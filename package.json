@@ -1,0 +1,54 @@
+{
+  "name": "dsh-think-effort",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Automatic thinking depth for DeepSeek routes in DeepSeek Harness: declare the model's effort vocabulary, add Auto to the model selector, resolve it to the declared default, and drop cheap host-owned calls to Low.",
+  "icon": "./icon.svg",
+  "license": "MIT",
+  "author": "mhlywxl",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "reasoning-effort",
+    "thinking-level",
+    "deepseek"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "src/**",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "check": "node --check index.js && node --check src/policy.js && node --test \"test/*.test.mjs\""
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mhlywxl/dsh-think-effort.git"
+  },
+  "homepage": "https://github.com/mhlywxl/dsh-think-effort#readme",
+  "bugs": {
+    "url": "https://github.com/mhlywxl/dsh-think-effort/issues"
+  }
+}

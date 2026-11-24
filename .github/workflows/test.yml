@@ -1,0 +1,23 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: syntax
+        run: |
+          node --check index.js
+          node --check src/policy.js
+      - name: offline tests
+        run: node --test "test/*.test.mjs"
+      - name: npm package contents
+        run: npm pack --dry-run

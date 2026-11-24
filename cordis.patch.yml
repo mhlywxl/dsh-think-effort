@@ -1,0 +1,43 @@
+# dsh-think-effort bundle: one Host row that owns the effort policy.
+#
+# The row's `config` is the complete tuning surface. Every field may be omitted;
+# the plugin merges the row over its own defaults. Tune a value by adding an
+# override row for `think-effort` to the profile's cordis.patch.yml:
+#
+#   - id: think-effort
+#     config:
+#       auxLevel: low
+#       defaultEffort: high
+#
+- insert:
+    - id: think-effort
+      name: 'dsh-think-effort'
+      config:
+        enabled: true
+        # Declare `reasoningEfforts` for DeepSeek models that carry none.
+        declareCapability: true
+        # Endpoint suffixes treated as official DeepSeek.
+        deepseekHosts:
+          - deepseek.com
+        # Model-id test for hand-declared gateways (deepseek-v4.1-flash-1017, ...).
+        deepseekModelPattern: '^deepseek'
+        # Extra `provider/model` keys or model-id regular expressions to declare.
+        declareModels: []
+        # Declared vocabulary, escalation-ordered (DeepSeek: low/high/max).
+        efforts:
+          - low
+          - high
+          - max
+        # Route default depth; `auto` resolves here (DeepSeek: high).
+        defaultEffort: high
+        # What Auto resolves to, or a fixed level.
+        autoLevel: model-default
+        # Cheap host-owned calls drop to `auxLevel` when the model declares it.
+        auxDowngrade: true
+        auxPurposes:
+          - session-title
+          - compaction
+          - auto-review
+        auxLevel: low
+        # Which models offer Auto: all | declared | off.
+        autoScope: all

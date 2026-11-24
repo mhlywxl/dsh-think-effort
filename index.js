@@ -1,0 +1,407 @@
+/**
+ * Host half of `dsh-think-effort` — declarative automatic thinking depth for
+ * DeepSeek routes in DeepSeek Harness.
+ *
+ * <h2>What this half does</h2>
+ *
+ * 1. **Declares the DeepSeek capability** (opt-in, idempotent). A gateway model
+ *    such as `deepseek-v4.1-flash-1017` reaches DSH through a hand-declared
+ *    `llm-pi-ai` route, so pi-ai's installed catalog has no reasoning metadata
+ *    for it: no level control appears, and any level DSH tried to send would be
+ *    refused. This half therefore writes the declaration the endpoint and model
+ *    imply (`low | high | max`, default `high`) into the route's own settings
+ *    surface. A model that already carries `reasoningEfforts` — including an
+ *    explicit `false` — is never touched.
+ * 2. **Advertises `auto`** in the model selector by wrapping each registered
+ *    adapter's `resolveModel`, so the switcher lists `auto` before the declared
+ *    levels.
+ * 3. **Resolves the request's effort** just before dispatch, inside the same
+ *    adapter facade: `auto` becomes the declared default (`high` for DeepSeek),
+ *    a cheap host-owned call (session title, compaction, auto-review) becomes
+ *    `low` when the model declares it, and an explicit user pick is passed
+ *    through untouched.
+ *
+ * <h2>Why the adapter facade</h2>
+ *
+ * DSH fixes the step's model selection before any plugin waterfall sees it, and
+ * `llm/stream` listeners cannot replace `GenerateOptions` (`next()` takes no
+ * arguments and the options are frozen). The adapter registry entry is the one
+ * seam that sees the very options the provider will receive, so the facade is
+ * where a per-request effort decision belongs. It also keeps the durable
+ * selection honest: a session that selected `auto` keeps saying `auto`, and the
+ * concrete depth is applied per request, which is what makes the choice survive
+ * retries and compaction unchanged.
+ *
+ * The facade writes nothing into a third party's adapter object: it replaces
+ * the registry entry and forwards every other member bound to the inner
+ * adapter.
+ *
+ * @module dsh-think-effort
+ */
+
+import {
+  normalizeConfig,
+  planCapabilitySection,
+  resolveCallEffort,
+  shouldDeclare,
+  withAutoEffort,
+} from './src/policy.js';
+
+/** The llm-pi-ai settings entry id in a composed profile. */
+const PI_AI_NAMESPACE = 'llm-pi-ai';
+
+/**
+ * Marks one facade so a re-run can tell "this registration already carries my
+ * wrapper" from "this is a third party's adapter". Not enumerable: it must not
+ * leak into an `Object.keys` sweep.
+ */
+const FACADE = Symbol('dsh-think-effort/adapter-facade');
+
+/** Every adapter member the facade forwards; `resolveModel`/`prepareCall` are handled here. */
+const FORWARDED = [
+  'providerInfo',
+  'providerRetryPolicy',
+  'imageRequestPricing',
+  'imageRequestTarget',
+  'listModels',
+  'stream',
+];
+
+/** One facade per inner adapter: one identity however many routes it serves. */
+const facades = new WeakMap();
+
+/**
+ * Build a forwarding facade over one adapter.
+ * @param {object} inner the adapter a third party registered; never mutated.
+ * @param {object} deps decoration and translation hooks.
+ * @returns {object} the facade to place in the registry entry.
+ */
+function adapterFacade(inner, deps) {
+  const facade = {
+    async resolveModel(provider, model, signal) {
+      const info = await inner.resolveModel.call(inner, provider, model, signal);
+      return deps.decorate(info, provider, model);
+    },
+    async prepareCall(provider, model, signal) {
+      const prepared = await inner.prepareCall.call(inner, provider, model, signal);
+      const info = deps.decorate(prepared.model, provider, model);
+      return {
+        model: info,
+        stream: (options) => prepared.stream.call(prepared, deps.translate(provider, model, options, info)),
+      };
+    },
+  };
+  // Forwarded members keep `this` bound to the inner adapter and a stable
+  // function identity, so a downstream cache keyed on identity keeps working.
+  for (const member of FORWARDED) {
+    const value = inner[member];
+    if (typeof value !== 'function') continue;
+    facade[member] = value.bind(inner);
+  }
+  Object.defineProperty(facade, FACADE, { value: true, enumerable: false });
+  return facade;
+}
+
+/** `setTimeout` in a Host keeps the process alive; this one must not. */
+function unrefTimer(timer) {
+  try {
+    timer?.unref?.();
+  } catch {
+    /* a non-Node timer has nothing to unref */
+  }
+}
+
+/** Read the live `llm-pi-ai` section, if the settings service is mounted. */
+function readPiAiSection(ctx) {
+  try {
+    const settings = ctx.get('settings');
+    if (settings === null || settings === undefined || typeof settings.describe !== 'function') return undefined;
+    const descriptors = settings.describe();
+    if (!Array.isArray(descriptors)) return undefined;
+    const hit = descriptors.find((entry) => entry !== null && typeof entry === 'object' && entry.ns === PI_AI_NAMESPACE);
+    if (hit === undefined) return undefined;
+    return { value: hit.value, revision: hit.revision };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Plugin body.
+ * @param {import('@deepseek-ai/cordis').Context} ctx the owning Host context.
+ * @param {object} [rawConfig] this row's config from the profile patch.
+ */
+export function apply(ctx, rawConfig) {
+  const config = normalizeConfig(rawConfig);
+  /** Diagnostic channel: opt-in stderr trace for a profile that hides the Host log. */
+  const trace = (message, ...rest) => {
+    if (config.trace !== true) return;
+    try {
+      let index = 0;
+      const text = String(message).replace(/%s/g, () => String(rest[index++]));
+      process.stderr.write(`[think-effort] ${text}${index < rest.length ? ' ' + rest.slice(index).map(String).join(' ') : ''}\n`);
+    } catch {
+      /* a trace must never break the turn */
+    }
+  };
+  trace('apply: enabled=%s declareCapability=%s', config.enabled, config.declareCapability);
+  if (config.enabled === false) {
+    ctx.logger?.info?.('[think-effort] disabled by config; no capability declaration or effort policy installed');
+    return;
+  }
+
+  /** Models this plugin declared, keyed `provider/model` (used by `autoScope: declared`). */
+  const declaredModels = new Set();
+  /** Log de-duplication for per-request decisions. */
+  const logged = new Set();
+
+  // ── capability declaration ───────────────────────────────────────────────
+  /** Serialize settings writes; a boot burst must not stack whole-section updates. */
+  let syncTail = Promise.resolve();
+  let syncAgain = false;
+  const syncCapabilities = () => {
+    if (!config.declareCapability) return;
+    if (syncAgain) return;
+    syncAgain = true;
+    syncTail = syncTail.then(async () => {
+      syncAgain = false;
+      const section = readPiAiSection(ctx);
+      trace('capability sync: section=%s', section === undefined ? 'missing' : 'found');
+      if (section === undefined) return;
+      const plan = planCapabilitySection(section.value, config);
+      trace('capability sync: changed=%s declared=%s', plan.changed, plan.declared.map((entry) => `${entry.provider}/${entry.model}`).join(','));
+      for (const entry of plan.declared) declaredModels.add(`${entry.provider}/${entry.model}`);
+      if (!plan.changed) return;
+      const settings = ctx.get('settings');
+      if (settings === null || settings === undefined || typeof settings.update !== 'function') return;
+      try {
+        await settings.update(PI_AI_NAMESPACE, { providers: plan.section.providers }, section.revision);
+        trace('capability sync: section written');
+        void selfCheck();
+        ctx.logger?.info?.(
+          '[think-effort] declared DeepSeek effort capabilities in %s: %s',
+          PI_AI_NAMESPACE,
+          plan.declared.map((entry) => `${entry.provider}/${entry.model} (${entry.reason})`).join(', ') || 'none',
+        );
+      } catch (error) {
+        trace('capability sync: write rejected: %s', error instanceof Error ? error.message : String(error));
+        // A schema gate (older llm-pi-ai without the field) keeps the previous
+        // section: report it instead of pretending the model gained levels.
+        ctx.logger?.warn?.('[think-effort] capability declaration rejected by the llm-pi-ai schema; kept the previous section', error);
+      }
+    }).catch((error) => {
+      syncAgain = false;
+      ctx.logger?.warn?.('[think-effort] capability sync failed', error);
+    });
+  };
+
+  const policyDeps = {
+    decorate(info, provider, model) {
+      if (info === null || typeof info !== 'object') return info;
+      const key = `${provider}/${model}`;
+      const declared = declaredModels.has(key) || shouldDeclare({ provider, modelId: model }, config).declared;
+      return withAutoEffort(info, config, { declared });
+    },
+    translate(provider, model, options, info) {
+      if (options === null || typeof options !== 'object') return options;
+      const reasoning = info !== null && typeof info === 'object' ? info.reasoning : undefined;
+      const level = resolveCallEffort({
+        requested: options.reasoningEffort,
+        purpose: options.purpose,
+        efforts: reasoning !== null && typeof reasoning === 'object' ? reasoning.efforts : undefined,
+        defaultEffort: reasoning !== null && typeof reasoning === 'object' ? reasoning.defaultEffort : undefined,
+      }, config);
+      if (level === undefined || level === options.reasoningEffort) return options;
+      const key = `${provider}/${model}/${String(options.purpose ?? '-')}/${level}`;
+      trace('translate: %s/%s purpose=%s requested=%s -> %s', provider, model, String(options.purpose ?? '-'), String(options.reasoningEffort), level);
+      if (!logged.has(key)) {
+        logged.add(key);
+        ctx.logger?.info?.(
+          '[think-effort] %s/%s purpose=%s auto -> %s',
+          provider,
+          model,
+          String(options.purpose ?? '-'),
+          level,
+        );
+      }
+      return { ...options, reasoningEffort: level };
+    },
+  };
+
+  /** Route registrations replaced by this plugin, so unload can put them back. */
+  /** @type {Array<{route: string, facade: object, registration: object}>} */
+  const installed = [];
+
+  const install = () => {
+    const llm = ctx.get('llm');
+    const adapters = llm?.adapters;
+    if (adapters === undefined || typeof adapters.get !== 'function' || typeof adapters.set !== 'function') return;
+    // Snapshot first: the loop replaces entries and a live iterator would revisit them.
+    for (const [route, registration] of [...adapters]) {
+      const inner = registration?.adapter;
+      if (inner === null || inner === undefined || inner[FACADE] === true) continue;
+      let facade = facades.get(inner);
+      if (facade === undefined) {
+        facade = adapterFacade(inner, policyDeps);
+        facades.set(inner, facade);
+      }
+      try {
+        adapters.set(route, { ...registration, adapter: facade });
+        installed.push({ route, facade, registration });
+      } catch (error) {
+        ctx.logger?.warn?.('[think-effort] could not wrap adapter for route %s', route, error);
+      }
+    }
+  };
+
+  /**
+   * Boot-time self check (trace only): report what the model now advertises and
+   * what the policy resolves, without sending a model request. It is the only
+   * way to see the whole pipeline in a profile whose Host log is not visible.
+   * @returns {Promise<void>} fulfillment after the report is traced.
+   */
+  const selfCheck = async () => {
+    if (config.trace !== true) return;
+    try {
+      const selection = ctx.get('agentDefaultModel')?.currentSelection?.();
+      const provider = selection?.provider;
+      const model = selection?.model;
+      if (typeof provider !== 'string' || typeof model !== 'string') {
+        trace('self check: no default selection');
+        return;
+      }
+      const info = await ctx.get('llm')?.resolveModelInfo?.(provider, model);
+      const reasoning = info?.reasoning;
+      const efforts = Array.isArray(reasoning?.efforts) ? reasoning.efforts.map((effort) => effort.id) : [];
+      const auto = resolveCallEffort({ requested: 'auto', efforts: reasoning?.efforts, defaultEffort: reasoning?.defaultEffort, purpose: 'agent' }, config);
+      const aux = resolveCallEffort({ requested: 'auto', efforts: reasoning?.efforts, defaultEffort: reasoning?.defaultEffort, purpose: config.auxPurposes[0] ?? 'session-title' }, config);
+      trace('self check: %s/%s efforts=[%s] default=%s auto=%s aux=%s', provider, model, efforts.join(' '), String(reasoning?.defaultEffort), String(auto), String(aux));
+    } catch (error) {
+      trace('self check failed: %s', error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  install();
+  syncCapabilities();
+
+  ctx.on('llm/adapters-updated', () => {
+    install();
+    syncCapabilities();
+  });
+  ctx.on('settings/document-updated', (ns) => {
+    if (ns === PI_AI_NAMESPACE) syncCapabilities();
+  });
+  ctx.on('app-boot/config-reload', () => syncCapabilities());
+  // Delayed retries cover the boot order where this plugin applies before the
+  // settings service has described the llm-pi-ai entry, and no later commit
+  // touches that namespace. The second beat also covers a bundle installed
+  // into an already-running Host, where no boot-time describe chain follows.
+  const retries = [2500, 10000].map((delay) => {
+    const timer = setTimeout(() => syncCapabilities(), delay);
+    unrefTimer(timer);
+    return timer;
+  });
+  ctx.effect(() => () => {
+    for (const timer of retries) clearTimeout(timer);
+  }, 'think-effort: capability retries');
+
+  /**
+   * Wait for a queued capability declaration, so a reader that runs right after
+   * boot (the status tool, the first model catalog load) sees the declaration
+   * rather than the section it replaced.
+   * @returns {Promise<void>} settlement of the current write chain.
+   */
+  const flushCapabilities = async () => {
+    syncCapabilities();
+    await syncTail.catch(() => undefined);
+  };
+
+  // ── status tool ──────────────────────────────────────────────────────────
+  // The Host has no read-only surface for "what depth will this model take and
+  // what does Auto resolve to", and the answer depends on a settings write that
+  // may still be in flight. One small tool answers it for the user and for a
+  // reviewer of this plugin, without sending any model request.
+  const statusTool = {
+    name: 'reasoning_effort_status',
+    description:
+      'Report the reasoning depths one provider/model declares, the route default, and what Auto resolves to for a normal step and for a cheap host-owned call. Read-only: sends no model request.',
+    parameters: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string', description: 'Provider route; defaults to the current default selection.' },
+        model: { type: 'string', description: 'Model id; defaults to the current default selection.' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'object' },
+      render: (_args, value) => [{
+        type: 'text',
+        text: typeof value?.summary === 'string' ? value.summary : 'reasoning effort status unavailable',
+      }],
+    },
+    async execute(args) {
+      await flushCapabilities();
+      const selection = ctx.get('agentDefaultModel')?.currentSelection?.();
+      const provider = typeof args?.provider === 'string' && args.provider !== '' ? args.provider : selection?.provider;
+      const model = typeof args?.model === 'string' && args.model !== '' ? args.model : selection?.model;
+      if (typeof provider !== 'string' || typeof model !== 'string') {
+        return { ok: false, summary: 'No provider/model given and no default selection is recorded.' };
+      }
+      const llm = ctx.get('llm');
+      if (llm === null || llm === undefined || typeof llm.resolveModelInfo !== 'function') {
+        return { ok: false, summary: 'The llm service is not available in this profile.' };
+      }
+      let info;
+      try {
+        info = await llm.resolveModelInfo(provider, model);
+      } catch (error) {
+        return { ok: false, provider, model, summary: `Cannot resolve ${provider}/${model}: ${error instanceof Error ? error.message : String(error)}` };
+      }
+      const reasoning = info?.reasoning;
+      const efforts = Array.isArray(reasoning?.efforts) ? reasoning.efforts.map((effort) => effort.id) : [];
+      const defaultEffort = reasoning?.defaultEffort;
+      const auto = resolveCallEffort({ requested: 'auto', efforts: reasoning?.efforts, defaultEffort, purpose: 'agent' }, config);
+      const auxPurpose = config.auxPurposes[0] ?? 'session-title';
+      const aux = resolveCallEffort({ requested: 'auto', efforts: reasoning?.efforts, defaultEffort, purpose: auxPurpose }, config);
+      const summary = efforts.length === 0
+        ? `${provider}/${model} declares no reasoning depths; the selector offers only the provider default.`
+        : `${provider}/${model}: ${efforts.join(' | ')}; default=${defaultEffort ?? '(none)'}; Auto -> ${auto ?? '(adapter default)'} for a normal step -> ${aux ?? '(adapter default)'} for ${auxPurpose}.`;
+      return { ok: true, provider, model, efforts, defaultEffort: defaultEffort ?? null, auto: auto ?? null, aux: aux ?? null, auxPurpose, summary };
+    },
+  };
+  ctx.inject?.(['tools'], (scope) => {
+    scope.effect(() => scope.tools.register(statusTool), 'think-effort: status tool');
+  });
+
+  // Unload: put every registry entry we replaced back, then retire a durable
+  // `auto` selection so a session cannot keep a mask that no longer resolves
+  // (DSH validates the selection against the model's efforts on every request).
+  ctx.effect(() => () => {
+    const llm = ctx.get('llm');
+    const adapters = llm?.adapters;
+    for (const { route, facade, registration } of installed) {
+      try {
+        const current = adapters?.get?.(route);
+        if (current?.adapter === facade) adapters.set(route, registration);
+      } catch {
+        /* a torn-down registry is already gone */
+      }
+    }
+    installed.length = 0;
+    try {
+      const agents = ctx.get('agents');
+      const live = typeof agents?.list === 'function' ? agents.list() : [];
+      for (const agent of live) {
+        const current = agent?.model?.current?.();
+        if (current === undefined || current.reasoningEffort !== 'auto') continue;
+        const { provider, model } = current;
+        const { reasoningEffort: _drop, ...rest } = current;
+        agent.model.select(rest);
+        ctx.logger?.info?.('[think-effort] retired auto selection on %s/%s at unload', provider, model);
+      }
+    } catch {
+      /* unload must not throw */
+    }
+  }, 'think-effort: adapters and auto selections');
+}
