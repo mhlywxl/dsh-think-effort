@@ -13,6 +13,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
+      # index.js imports its runtime dependency (@deepseek-ai/schemastery), so the
+      # test bench needs the install step before it can resolve anything.
+      - name: install dependencies
+        run: npm ci --no-audit --no-fund
       - name: syntax
         run: |
           node --check index.js

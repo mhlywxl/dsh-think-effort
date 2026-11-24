@@ -8,6 +8,7 @@
 - **浏览器半边**：新增 `client.js`（`plugins.row.config` 键 `dsh-think-effort#think-effort`），中英双语文案，跟随 DSH 主题变量。
 - 文档：明确**新安装免重启**（DSH base bundle 的 HMR 直接激活新 bundle）；升级已安装版本才需要重启 Host。
 - 测试：26 项（新增子代理策略、volatile 配置热更新、子代理会话识别）。
+- CI：提交 `package-lock.json`（从 npm registry 解析，不含本机路径），`test` 与 `release` 的 verify 任务先 `npm ci` 再跑语法检查与离线测试。此前的构建失败是 `index.js` 新增运行时依赖后 CI 未安装依赖（`ERR_MODULE_NOT_FOUND: @deepseek-ai/schemastery`）。
 
 ## 0.2.1 — 2026-11-24
 
