@@ -86,6 +86,14 @@ export const DEFAULT_CONFIG = {
   auxLevel: 'low',
   /** Which models get the `auto` mask in the model selector: `all` | `declared` | `off`. */
   autoScope: 'all',
+  /**
+   * Effort for subagent-owned calls: `inherit` leaves the child agent's own
+   * selection alone; `auto` follows this plugin's default resolution; a level
+   * id forces that depth (clamped to the model's declared vocabulary).
+   */
+  subagentLevel: 'inherit',
+  /** Diagnostic stderr trace of each decision. */
+  trace: false,
 };
 
 /** Merge a patch row over the defaults without validating types yet. */
@@ -374,6 +382,24 @@ export function isAuxPurpose(purpose, rawCfg) {
 }
 
 /**
+ * Depth `auto` resolves to for ordinary steps.
+ * @param {object} cfg normalized plugin config.
+ * @param {readonly object[]} efforts declared vocabulary.
+ * @param {string} [defaultEffort] model/route default depth.
+ * @returns {string | undefined} a declared depth, or undefined without one.
+ */
+function autoTarget(cfg, efforts, defaultEffort) {
+  const depths = depthLevels(efforts);
+  if (depths.length === 0) return undefined;
+  const target = cfg.autoLevel === 'model-default' || cfg.autoLevel === undefined
+    ? defaultEffort
+    : cfg.autoLevel;
+  if (typeof target === 'string' && depths.includes(target)) return target;
+  if (typeof target === 'string') return clampEffort(target, efforts);
+  return clampEffort('high', efforts, depths[depths.length - 1]);
+}
+
+/**
  * Decide the effort one model request should carry.
  *
  * The rules, in order:
@@ -382,36 +408,43 @@ export function isAuxPurpose(purpose, rawCfg) {
  *    with no explicit selection either: those calls are applied
  *    unconditionally, because a session's own depth never applies to a bounded
  *    summary request.
- * 2. An explicit level → `undefined`: a user pick is passed through untouched
+ * 2. A subagent-owned call with `subagentLevel` set → that level, or the
+ *    plugin's `auto` resolution for `auto`. The child's own selection and
+ *    inherited parent selection are overridden only when the user opted in.
+ * 3. An explicit level → `undefined`: a user pick is passed through untouched
  *    (DSH validates it against the same vocabulary, so an undeclared pick never
  *    reaches the wire).
- * 3. No explicit selection on an ordinary call → `undefined`: the adapter's own
+ * 4. No explicit selection on an ordinary call → `undefined`: the adapter's own
  *    default stands (with the declaration above, that is `high`).
- * 4. `auto` → the declared route default (DeepSeek: `high`), or the
+ * 5. `auto` → the declared route default (DeepSeek: `high`), or the
  *    highest declared depth when the route names none.
  *
  * @param {object} input decision inputs.
  * @param {string} [input.requested] the selection's effort.
  * @param {string} [input.purpose] LLM request purpose.
+ * @param {boolean} [input.isSubagent] whether the call belongs to a subagent session.
  * @param {readonly object[]} [input.efforts] declared vocabulary.
  * @param {string} [input.defaultEffort] route/model default depth.
  * @param {object} rawCfg plugin config.
  * @returns {string | undefined} the level to send, or undefined to leave the request alone.
  */
-export function resolveCallEffort({ requested, purpose, efforts, defaultEffort }, rawCfg) {
+export function resolveCallEffort({ requested, purpose, isSubagent, efforts, defaultEffort }, rawCfg) {
   const cfg = normalizeConfig(rawCfg);
-  if (requested !== undefined && requested !== AUTO_EFFORT) return undefined;
   const depths = depthLevels(efforts);
   if (depths.length === 0) return undefined;
-  if (isAuxPurpose(purpose, cfg)) {
-    const aux = clampEffort(cfg.auxLevel, efforts);
+  const aux = isAuxPurpose(purpose, cfg) ? clampEffort(cfg.auxLevel, efforts) : undefined;
+  // A pinned subagent depth outranks the child's own or inherited selection:
+  // without that, a child inheriting the parent's fixed depth could never be
+  // lowered and the setting would be inert for the common case. Cheap calls
+  // still win, because a summary request has no task difficulty to describe.
+  if (isSubagent === true && cfg.subagentLevel !== undefined && cfg.subagentLevel !== 'inherit') {
     if (aux !== undefined) return aux;
+    return cfg.subagentLevel === AUTO_EFFORT
+      ? autoTarget(cfg, efforts, defaultEffort)
+      : clampEffort(cfg.subagentLevel, efforts);
   }
+  if (requested !== undefined && requested !== AUTO_EFFORT) return undefined;
+  if (aux !== undefined) return aux;
   if (requested === undefined) return undefined;
-  const target = cfg.autoLevel === 'model-default' || cfg.autoLevel === undefined
-    ? defaultEffort
-    : cfg.autoLevel;
-  if (typeof target === 'string' && depths.includes(target)) return target;
-  if (typeof target === 'string') return clampEffort(target, efforts);
-  return clampEffort('high', efforts, depths[depths.length - 1]);
+  return autoTarget(cfg, efforts, defaultEffort);
 }

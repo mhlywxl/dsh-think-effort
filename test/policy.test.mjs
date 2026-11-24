@@ -219,3 +219,32 @@ test('config normalization keeps arrays usable', () => {
   assert.deepEqual(cfg.auxPurposes, ['session-title', 'compaction', 'auto-review']);
   assert.deepEqual(cfg.deepseekHosts, ['deepseek.com']);
 });
+
+test('a subagent pin outranks the child selection but yields to cheap calls', () => {
+  const vocab = effortsOf('auto', 'low', 'high', 'max');
+  const inherit = normalizeConfig({});
+  const pinnedLow = normalizeConfig({ subagentLevel: 'low' });
+  const pinnedAuto = normalizeConfig({ subagentLevel: 'auto' });
+  const pinnedMedium = normalizeConfig({ subagentLevel: 'medium' });
+
+  // inherit: no forcing, the ordinary rules stand.
+  assert.equal(resolveCallEffort({ requested: undefined, isSubagent: true, efforts: vocab, defaultEffort: 'high' }, inherit), undefined);
+  assert.equal(resolveCallEffort({ requested: 'auto', isSubagent: true, efforts: vocab, defaultEffort: 'high' }, inherit), 'high');
+
+  // A fixed pin overrides an inherited or tool-picked child depth.
+  assert.equal(resolveCallEffort({ requested: 'max', isSubagent: true, efforts: vocab, defaultEffort: 'high' }, pinnedLow), 'low');
+  assert.equal(resolveCallEffort({ requested: undefined, isSubagent: true, efforts: vocab, defaultEffort: 'high' }, pinnedLow), 'low');
+
+  // `auto` follows the plugin's Auto resolution, including autoLevel.
+  assert.equal(resolveCallEffort({ requested: undefined, isSubagent: true, efforts: vocab, defaultEffort: 'high' }, pinnedAuto), 'high');
+  assert.equal(resolveCallEffort({ requested: undefined, isSubagent: true, efforts: vocab, defaultEffort: 'high' }, normalizeConfig({ subagentLevel: 'auto', autoLevel: 'max' })), 'max');
+
+  // An undeclared pin clamps instead of inventing a level.
+  assert.equal(resolveCallEffort({ requested: undefined, isSubagent: true, efforts: vocab, defaultEffort: 'high' }, pinnedMedium), 'high');
+
+  // Cheap host-owned calls inside a subagent still use the auxiliary level.
+  assert.equal(resolveCallEffort({ requested: 'max', isSubagent: true, purpose: 'compaction', efforts: vocab, defaultEffort: 'high' }, normalizeConfig({ subagentLevel: 'max' })), 'low');
+
+  // Without a subagent session the pin does not leak into ordinary steps.
+  assert.equal(resolveCallEffort({ requested: 'max', efforts: vocab, defaultEffort: 'high' }, pinnedLow), undefined);
+});

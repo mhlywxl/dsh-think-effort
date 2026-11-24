@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { apply } from '../index.js';
+import { apply, Config, isSubagentAgent } from '../index.js';
 
 const PI_AI_SECTION = {
   providers: {
@@ -65,7 +65,7 @@ function fakeHost({ section = PI_AI_SECTION, adapter }) {
       section = { ...section, ...patch };
     },
   };
-  const agents = { list: () => [] };
+  const agents = { list: () => [], get: () => undefined };
   const ctx = {
     logger: { info() {}, warn() {} },
     get(name) {
@@ -198,4 +198,70 @@ test('unload restores the original registration and retires durable Auto', async
   host.ctx.flush();
   assert.equal(host.adapters.get('aigw-coding').adapter, original);
   assert.deepEqual(selections, [{ provider: 'aigw-coding', model: 'deepseek-v4.1-flash-1017' }]);
+});
+
+/** One volatile reference whose value a test can replace, like `.volatile()` config. */
+function volatileRef(value) {
+  return {
+    current: value,
+    get() {
+      return this.current;
+    },
+    set(next) {
+      this.current = next;
+    },
+  };
+}
+
+test('a subagent override applies through the volatile config reference', async () => {
+  const adapter = fakeAdapter(['low', 'high', 'max']);
+  const host = fakeHost({ adapter });
+  const subagentLevel = volatileRef('inherit');
+  host.agents.get = (id) => (id === 'child-1'
+    ? { session: { header: { origin: 'subagent', delegationDepth: 1 } } }
+    : undefined);
+  apply(host.ctx, { subagentLevel });
+  await tick();
+  await tick();
+  const registered = host.adapters.get('aigw-coding').adapter;
+  const prepared = await registered.prepareCall('aigw-coding', 'deepseek-v4.1-flash-1017');
+
+  prepared.stream({ reasoningEffort: 'auto', sessionId: 'child-1' });
+  prepared.stream({ sessionId: 'child-1' });
+  prepared.stream({ reasoningEffort: 'auto', sessionId: 'root-1' });
+
+  // inherit: the child keeps its own resolution; the root keeps Auto.
+  assert.deepEqual(adapter.received, ['high', undefined, 'high']);
+
+  subagentLevel.set('max');
+  host.ctx.emit('loader/volatile-update');
+  prepared.stream({ reasoningEffort: 'auto', sessionId: 'child-1' });
+  prepared.stream({ reasoningEffort: 'low', sessionId: 'child-1' });
+  prepared.stream({ purpose: 'session-title', sessionId: 'child-1' });
+  prepared.stream({ reasoningEffort: 'auto', sessionId: 'root-1' });
+
+  // max overrides both the child's own pick and an absent one; cheap calls win.
+  assert.deepEqual(adapter.received.slice(3), ['max', 'max', 'low', 'high']);
+});
+
+test('the exported Config accepts the documented defaults and keeps fields live', () => {
+  assert.equal(typeof Config, 'function');
+  const parsed = Config({});
+  assert.equal(typeof parsed.enabled.get, 'function');
+  assert.equal(parsed.enabled.get(), true);
+  assert.equal(parsed.subagentLevel.get(), 'inherit');
+  assert.deepEqual(parsed.efforts.get(), ['low', 'high', 'max']);
+  const custom = Config({ subagentLevel: 'high', efforts: ['low', 'high'], auxDowngrade: false });
+  assert.equal(custom.subagentLevel.get(), 'high');
+  assert.deepEqual(custom.efforts.get(), ['low', 'high']);
+  assert.equal(custom.auxDowngrade.get(), false);
+});
+
+test('subagent sessions are recognised from the durable session header', () => {
+  assert.equal(isSubagentAgent(undefined), false);
+  assert.equal(isSubagentAgent({}), false);
+  assert.equal(isSubagentAgent({ session: { header: { origin: 'user' } } }), false);
+  assert.equal(isSubagentAgent({ session: { header: { origin: 'subagent' } } }), true);
+  assert.equal(isSubagentAgent({ session: { header: { delegationDepth: 2 } } }), true);
+  assert.equal(isSubagentAgent({ session: { header: { delegationDepth: 0 } } }), false);
 });

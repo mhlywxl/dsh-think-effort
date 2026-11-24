@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Automatic thinking depth",
-    "description": "Adds Auto to the model selector for reasoning models and resolves it per request: the declared default depth for normal steps (high on DeepSeek), Low for cheap host-owned calls such as session titles and compaction, and the model's own declared vocabulary everywhere else.",
+    "description": "Adds Auto to the model selector for reasoning models and resolves it per request: the declared default for normal steps (high on DeepSeek), Low for cheap host-owned calls, and an optional depth just for subagents — all editable on a live visual settings page.",
     "detail": "docs/DETAIL.en.md"
   }
 }

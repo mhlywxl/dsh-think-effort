@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "自动思考档位",
-    "description": "为推理模型在模型选择器里加上 Auto，并逐请求解析：普通步骤用模型声明的默认档位（DeepSeek 为 high），会话标题/压缩等由 Harness 自己发起的廉价调用用 low，其余情况只用模型自己声明的档位。",
+    "description": "为推理模型在模型选择器里加上 Auto，并逐请求解析：普通步骤用声明的默认档（DeepSeek 为 high），廉价调用用 low，子代理可单独指定强度；全部规则都能在可视化设置页即时调整。",
     "detail": "docs/DETAIL.zh.md"
   }
 }

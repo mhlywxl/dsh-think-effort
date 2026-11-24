@@ -7,12 +7,16 @@
 1. **声明能力（默认开启）**：手工在 `llm-pi-ai` 里声明的 DeepSeek 网关模型通常没有推理元数据——选择器里没有任何档位，任何档位也会被拒绝。插件按 endpoint 与模型 ID 识别 DeepSeek 模型，把 `reasoningEfforts`（默认 `low / high / max`）与路由默认档（`high`）写进 `llm-pi-ai` 的设置面。已经有 `reasoningEfforts`（包括显式 `false`）的模型不会被改动。
 2. **提供 `Auto`**：在模型目录的档位列表最前面补一个 `Auto`。
 3. **逐请求解析**：在适配器边界把 `auto` 换成声明默认档；`purpose` 属于廉价调用时换成 `low`（仅当模型声明了它，且**与会话选了什么都无关**——会话标题/图片摘要本来就不继承会话档位）；手动选的档位一律原样透传，由 DSH 自己校验。
+4. **子代理档位**：可给子代理统一指定强度（`inherit` / `auto` / `low`…`max`）。`inherit` 保持 DSH 原生继承；固定档会覆盖子代理自身或从父代理继承的选择，廉价调用的降档仍然优先。
 
 ## 使用
 
 - 在模型选择器里选 `Auto` 即声明「按默认档走」；选具体档位即固定该档位。
 - 不选任何档位（原生“提供方默认”）在普通步骤上与 `Auto` 等效，都会落到声明默认档；差别只是 `Auto` 把意图记录进会话。廉价调用的降档在任何情况下都生效。
 - 识别范围、默认档、廉价调用清单都在插件配置里（`cordis.patch.yml` 的 `think-effort` 行）。
+- 更推荐用可视化设置：**插件 → 自动思考档位 → 配置**，字段全部是 `volatile` 配置，保存后立即生效（无需重启）。
+
+![设置页](settings.png)
 
 ## 限制
 
@@ -36,8 +40,9 @@
 | `auxPurposes` | `session-title, compaction, auto-review` | 视为廉价调用的 `purpose` |
 | `auxLevel` | `low` | 廉价调用用的档位 |
 | `autoScope` | `all` | `all` / `declared` / `off` |
+| `subagentLevel` | `inherit` | 子代理档位：`inherit` / `auto` / 固定档；固定档覆盖子代理自身或继承的选择 |
 | `trace` | `false` | 把决策写到 stderr（排查用） |
 
 ## 诊断工具
 
-会话里可以让 Agent 调 `reasoning_effort_status`：它报告某模型声明的档位、默认档、`Auto` 解析结果与廉价调用档位，不发任何模型请求。
+会话里可以让 Agent 调 `reasoning_effort_status`：它报告某模型声明的档位、默认档、`Auto` 与子代理的解析结果、廉价调用档位，不发任何模型请求。

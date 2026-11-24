@@ -41,3 +41,5 @@
         auxLevel: low
         # Which models offer Auto: all | declared | off.
         autoScope: all
+        # Subagent calls: inherit | auto | low/high/max. Applies immediately.
+        subagentLevel: inherit

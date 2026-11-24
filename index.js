@@ -39,7 +39,10 @@
  * @module dsh-think-effort
  */
 
+import z from '@deepseek-ai/schemastery';
+
 import {
+  DEFAULT_CONFIG,
   normalizeConfig,
   planCapabilitySection,
   resolveCallEffort,
@@ -49,6 +52,67 @@ import {
 
 /** The llm-pi-ai settings entry id in a composed profile. */
 const PI_AI_NAMESPACE = 'llm-pi-ai';
+
+/**
+ * The row's complete tuning surface, exposed to Settings as a live form.
+ *
+ * Every field is volatile: the plugin manager page edits one row and the
+ * running policy must follow without remounting the adapter facade, so the
+ * values arrive as references and are re-read on `loader/volatile-update`.
+ * Defaults mirror `cordis.patch.yml` and {@link DEFAULT_CONFIG}.
+ */
+export const Config = z.object({
+  /** Master switch for the whole policy. */
+  enabled: z.boolean().default(true).volatile(),
+  /** Declare `reasoningEfforts` for matched models that carry none. */
+  declareCapability: z.boolean().default(true).volatile(),
+  /** Endpoint suffixes treated as an official DeepSeek host. */
+  deepseekHosts: z.array(z.string()).default([...DEFAULT_CONFIG.deepseekHosts]).volatile(),
+  /** Model-id test for hand-declared gateways. */
+  deepseekModelPattern: z.string().default(DEFAULT_CONFIG.deepseekModelPattern).volatile(),
+  /** Extra `provider/model` keys or model-id tests to declare. */
+  declareModels: z.array(z.string()).default([]).volatile(),
+  /** Declared depth vocabulary, escalation-ordered. */
+  efforts: z.array(z.string()).default([...DEFAULT_CONFIG.efforts]).volatile(),
+  /** Route default depth; `auto` resolves here unless `autoLevel` pins another. */
+  defaultEffort: z.string().default(DEFAULT_CONFIG.defaultEffort).volatile(),
+  /** `model-default` follows the route default, or a fixed level id. */
+  autoLevel: z.string().default(DEFAULT_CONFIG.autoLevel).volatile(),
+  /** Which models offer Auto: `all` | `declared` | `off`. */
+  autoScope: z.union([z.const('all'), z.const('declared'), z.const('off')]).default(DEFAULT_CONFIG.autoScope).volatile(),
+  /** Downgrade cheap host-owned calls when the model declares the level. */
+  auxDowngrade: z.boolean().default(DEFAULT_CONFIG.auxDowngrade).volatile(),
+  /** LLM request purposes that are host-owned cheap calls. */
+  auxPurposes: z.array(z.string()).default([...DEFAULT_CONFIG.auxPurposes]).volatile(),
+  /** Level those calls request. */
+  auxLevel: z.string().default(DEFAULT_CONFIG.auxLevel).volatile(),
+  /** Subagent-owned calls: `inherit`, `auto`, or a fixed level. */
+  subagentLevel: z.string().default(DEFAULT_CONFIG.subagentLevel).volatile(),
+  /** Diagnostic stderr trace of each decision. */
+  trace: z.boolean().default(false).volatile(),
+});
+
+/** Whether one parsed config value is a volatile reference. */
+function isVolatileRef(value) {
+  return value !== null && typeof value === 'object' && typeof value.get === 'function' && !Array.isArray(value);
+}
+
+/**
+ * Read the live policy config from the row's (possibly volatile) values.
+ * Constants and tests pass plain values; the Loader passes references.
+ * @param {object} [rawConfig] this row's config.
+ * @returns {object} a normalized plain config.
+ */
+export function readConfig(rawConfig) {
+  const source = rawConfig !== null && typeof rawConfig === 'object' ? rawConfig : {};
+  const plain = {};
+  for (const key of Object.keys(DEFAULT_CONFIG)) {
+    const value = source[key];
+    const plainValue = isVolatileRef(value) ? value.get() : value;
+    if (plainValue !== undefined) plain[key] = plainValue;
+  }
+  return normalizeConfig(plain);
+}
 
 /**
  * Marks one facade so a re-run can tell "this registration already carries my
@@ -127,12 +191,25 @@ function readPiAiSection(ctx) {
 }
 
 /**
+ * Whether one live Agent belongs to a subagent session.
+ * @param {object} [agent] a live Agent handle (`ctx.agents.get(id)`).
+ * @returns {boolean} true for a delegated child session.
+ */
+export function isSubagentAgent(agent) {
+  const header = agent?.session?.header;
+  if (header === null || typeof header !== 'object') return false;
+  return header.origin === 'subagent'
+    || (typeof header.delegationDepth === 'number' && header.delegationDepth > 0);
+}
+
+/**
  * Plugin body.
  * @param {import('@deepseek-ai/cordis').Context} ctx the owning Host context.
  * @param {object} [rawConfig] this row's config from the profile patch.
  */
 export function apply(ctx, rawConfig) {
-  const config = normalizeConfig(rawConfig);
+  /** Live policy config; re-read after a volatile update so Settings edits apply at once. */
+  let config = readConfig(rawConfig);
   /** Diagnostic channel: opt-in stderr trace for a profile that hides the Host log. */
   const trace = (message, ...rest) => {
     if (config.trace !== true) return;
@@ -152,6 +229,21 @@ export function apply(ctx, rawConfig) {
 
   /** Models this plugin declared, keyed `provider/model` (used by `autoScope: declared`). */
   const declaredModels = new Set();
+  /**
+   * Whether one request belongs to a subagent session. DSH stamps the session
+   * id on every request; the child's session header carries its durable
+   * delegation origin, so no extra seam or cached classification is needed.
+   * @param {string} [sessionId] stamped session identity.
+   * @returns {boolean} true for a subagent-owned session.
+   */
+  const isSubagentSession = (sessionId) => {
+    if (typeof sessionId !== 'string' || sessionId === '') return false;
+    try {
+      return isSubagentAgent(ctx.get('agents')?.get?.(sessionId));
+    } catch {
+      return false;
+    }
+  };
   /** Log de-duplication for per-request decisions. */
   const logged = new Set();
 
@@ -197,17 +289,20 @@ export function apply(ctx, rawConfig) {
 
   const policyDeps = {
     decorate(info, provider, model) {
+      if (config.enabled === false) return info;
       if (info === null || typeof info !== 'object') return info;
       const key = `${provider}/${model}`;
       const declared = declaredModels.has(key) || shouldDeclare({ provider, modelId: model }, config).declared;
       return withAutoEffort(info, config, { declared });
     },
     translate(provider, model, options, info) {
+      if (config.enabled === false) return options;
       if (options === null || typeof options !== 'object') return options;
       const reasoning = info !== null && typeof info === 'object' ? info.reasoning : undefined;
       const level = resolveCallEffort({
         requested: options.reasoningEffort,
         purpose: options.purpose,
+        isSubagent: isSubagentSession(options.sessionId),
         efforts: reasoning !== null && typeof reasoning === 'object' ? reasoning.efforts : undefined,
         defaultEffort: reasoning !== null && typeof reasoning === 'object' ? reasoning.defaultEffort : undefined,
       }, config);
@@ -292,6 +387,15 @@ export function apply(ctx, rawConfig) {
     if (ns === PI_AI_NAMESPACE) syncCapabilities();
   });
   ctx.on('app-boot/config-reload', () => syncCapabilities());
+  // A Settings edit commits volatile fields into the running references; the
+  // adapter facade reads this `config` variable per request, so only a re-read
+  // and one capability reconciliation are needed here.
+  ctx.on('loader/volatile-update', () => {
+    config = readConfig(rawConfig);
+    trace('volatile update: enabled=%s subagentLevel=%s', config.enabled, config.subagentLevel);
+    if (config.enabled === false) return;
+    syncCapabilities();
+  });
   // Delayed retries cover the boot order where this plugin applies before the
   // settings service has described the llm-pi-ai entry, and no later commit
   // touches that namespace. The second beat also covers a bundle installed
@@ -364,10 +468,21 @@ export function apply(ctx, rawConfig) {
       const auto = resolveCallEffort({ requested: 'auto', efforts: reasoning?.efforts, defaultEffort, purpose: 'agent' }, config);
       const auxPurpose = config.auxPurposes[0] ?? 'session-title';
       const aux = resolveCallEffort({ requested: 'auto', efforts: reasoning?.efforts, defaultEffort, purpose: auxPurpose }, config);
+      const subagentLevel = config.subagentLevel ?? 'inherit';
+      const subagent = subagentLevel === 'inherit'
+        ? undefined
+        : resolveCallEffort({ isSubagent: true, efforts: reasoning?.efforts, defaultEffort, purpose: 'agent' }, config);
       const summary = efforts.length === 0
         ? `${provider}/${model} declares no reasoning depths; the selector offers only the provider default.`
-        : `${provider}/${model}: ${efforts.join(' | ')}; default=${defaultEffort ?? '(none)'}; Auto -> ${auto ?? '(adapter default)'} for a normal step -> ${aux ?? '(adapter default)'} for ${auxPurpose}.`;
-      return { ok: true, provider, model, efforts, defaultEffort: defaultEffort ?? null, auto: auto ?? null, aux: aux ?? null, auxPurpose, summary };
+        : `${provider}/${model}: ${efforts.join(' | ')}; default=${defaultEffort ?? '(none)'}; Auto -> ${auto ?? '(adapter default)'} for a normal step -> ${aux ?? '(adapter default)'} for ${auxPurpose}`
+          + (subagentLevel === 'inherit'
+            ? '; subagents follow their own selection.'
+            : `; subagents -> ${subagent ?? '(adapter default)'} (${subagentLevel}).`);
+      return {
+        ok: true, provider, model, efforts, defaultEffort: defaultEffort ?? null,
+        auto: auto ?? null, aux: aux ?? null, auxPurpose,
+        subagentLevel, subagent: subagent ?? null, summary,
+      };
     },
   };
   ctx.inject?.(['tools'], (scope) => {

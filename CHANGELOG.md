@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-11-24
+
+- **可视化设置页**：插件 → 自动思考档位 → 配置。覆盖全部字段（启用、Auto 落点、模型默认档、子代理强度、Auto 适用范围、廉价调用、能力声明、高级诊断），保存后即时生效。
+- **子代理 effort**：新增 `subagentLevel`（`inherit` / `auto` / 固定档）。`inherit` 保持 DSH 原生继承；固定档覆盖子代理自身或从父代理继承的选择；廉价调用的降档仍然优先。`reasoning_effort_status` 同步报告子代理解析结果。
+- **实时配置**：`export const Config` 声明全部字段为 `volatile`；设置写入经 `loader/volatile-update` 热更新策略，无需重启、无需手改 `cordis.patch.yml`。新增运行时依赖 `@deepseek-ai/schemastery`。
+- **浏览器半边**：新增 `client.js`（`plugins.row.config` 键 `dsh-think-effort#think-effort`），中英双语文案，跟随 DSH 主题变量。
+- 文档：明确**新安装免重启**（DSH base bundle 的 HMR 直接激活新 bundle）；升级已安装版本才需要重启 Host。
+- 测试：26 项（新增子代理策略、volatile 配置热更新、子代理会话识别）。
+
 ## 0.2.1 — 2026-11-24
 
 - `package.json` 增加有界宿主声明 `engines.dsh: ">=0.2.0-rc.1 <0.3.0-0"`，插件市场与插件管理器可据此判断兼容性。

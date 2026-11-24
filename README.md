@@ -50,14 +50,31 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
 
 ### 启用与验证
 
-1. 安装后打开 **设置 → 插件**，确认 `dsh-think-effort` 已启用；桌面端需**完全退出并重开** DSH，Web 端需重启 `dsh web` 并硬刷新页面。
+1. **新安装不需要重启**：DSH 的 base bundle 默认启用 HMR，新 bundle 安装后直接激活（安装结果显示 `application: applied`）。打开 **插件** 页能看到「自动思考档位」即已生效；若页面是旧快照，刷新一次即可。
 2. 输入框右侧的模型 chip 应从 `deepseek-v4.1-flash-1017` 变成 `deepseek-v4.1-flash-1017 High`（或你模型的默认档）。
 3. 点开 chip →「推理等级」，应能看到 `Auto / Low / High / Max`。
-4. 想核对具体模型，可让 Agent 调用只读工具 `reasoning_effort_status`，它会报告该模型声明的档位、默认档、`Auto` 的解析结果与廉价调用档位，不发送任何模型请求。
+4. 想核对具体模型，可让 Agent 调用只读工具 `reasoning_effort_status`，它会报告该模型声明的档位、默认档、`Auto` 与子代理的解析结果、廉价调用档位，不发送任何模型请求。
+
+> **升级已安装版本**是另一回事：DSH 需要重启 Host 才能载入新的 JavaScript 模块代际（安装结果会报 `restart-required`）。这是 DSH 的进程模型，不是本插件的行为。
+
+### 可视化设置
+
+**插件 → 自动思考档位 → 行右侧「配置」**（桌面/Web 相同）：
+
+![设置页](docs/settings.png)
+
+- **档位分配**：普通步骤的 Auto 落点、模型默认档、**子代理推理强度**、哪些模型显示 Auto；
+- **廉价调用**：总开关、档位、purpose 清单；
+- **能力声明**：是否写入 `reasoningEfforts`、声明哪些档位、DeepSeek host/模型匹配规则；
+- **高级**：stderr 诊断。
+
+所有字段都是 `volatile` 配置：点「保存」后**立即生效**，不需要重启，也不用改 `cordis.patch.yml`。
 
 ### 本插件的第一次使用
 
 装上后不需要额外配置：`Auto` 与档位由插件自动声明。选中 `Auto` 即按默认档运行；选 `Low / High / Max` 即固定该档；不选（原生「提供方默认」）在普通步骤上与 `Auto` 等效。
+
+子代理默认**不干预**，保持 DSH 原生行为（继承父代理的模型与档位）。想让子代理固定用某一档，在设置页把「子代理 · 推理强度」改成 `Low / High / Max`，或选 `Auto` 跟随本插件的默认解析；廉价调用的降档仍然优先。
 
 ## 为什么需要它
 
@@ -99,6 +116,7 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
     auxPurposes: [session-title, compaction, auto-review]
     auxLevel: low
     autoScope: all
+    subagentLevel: inherit
     trace: false
 ```
 
@@ -116,6 +134,7 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
 | `auxPurposes` | `session-title, compaction, auto-review` | 视为廉价调用的 `purpose` |
 | `auxLevel` | `low` | 廉价调用用的档位 |
 | `autoScope` | `all` | `all` / `declared` / `off` |
+| `subagentLevel` | `inherit` | 子代理档位：`inherit` / `auto` / `low`…`max`；固定档会覆盖子代理自身或继承的选择 |
 | `trace` | `false` | 把决策写到 stderr（排查用） |
 
 ## 兼容性
@@ -174,21 +193,37 @@ Copy the `.tgz` (or an unpacked directory with `package.json` at its root) to th
 
 ### Enable and verify
 
-1. Settings → Plugins: confirm `dsh-think-effort` is enabled. Desktop needs a full quit and relaunch; Web needs `dsh web` restarted and a hard refresh.
+1. A **fresh install needs no restart**: the base bundle enables HMR, so a new bundle activates immediately (`application: applied`). The "Automatic thinking depth" card appears under **Plugins**; refresh the page if the list is stale.
 2. The model chip next to the composer reads `<model> High` (the model's default depth) instead of the bare model id.
 3. Open the chip → "Reasoning level": `Auto / Low / High / Max` are listed.
-4. For a specific model, ask the agent to call the read-only `reasoning_effort_status` tool: it reports the declared depths, the default, what `Auto` resolves to and the cheap-call depth, without sending a model request.
+4. For a specific model, ask the agent to call the read-only `reasoning_effort_status` tool: it reports the declared depths, the default, what `Auto` and subagents resolve to, and the cheap-call depth, without sending a model request.
+
+> **Upgrading an installed version** is different: DSH must restart the Host to load a fresh JavaScript module generation (`restart-required`). That is DSH's process model, not this plugin's behavior.
+
+### Visual settings
+
+**Plugins → Automatic thinking depth → Configure** on the row (Desktop and Web):
+
+![Settings page](docs/settings.png)
+
+- **Depth assignment**: the ordinary-step Auto target, the model default, the **subagent effort**, and which models offer Auto;
+- **Cheap calls**: switch, level, and purpose list;
+- **Capability declaration**: whether to write `reasoningEfforts`, which depths to declare, and the DeepSeek host/model rules;
+- **Advanced**: stderr diagnostics.
+
+Every field is `volatile`: **Save** applies immediately, without a restart and without hand-editing `cordis.patch.yml`.
 
 ### Features
 
 - Declares `reasoningEfforts` for DeepSeek models that carry none (gateway aliases included), so the selector finally has levels.
 - `Auto` resolves to the declared default depth on every request; an explicit pick passes through untouched.
+- **Subagent effort**: `inherit` keeps DSH's native behavior; `auto` follows this plugin's default; a fixed depth overrides the child's own or inherited pick.
 - Cheap host-owned calls (`session-title`, `compaction`, `auto-review`) drop to `low` only when the model declares it, regardless of the session's own choice.
 - Idempotent: a second boot writes nothing; unload restores the original adapter registrations and retires a durable `auto`.
 
 ### Configuration
 
-Override the `think-effort` row in the profile's `cordis.patch.yml`; the fields are listed in the Chinese section above. `declareCapability`, `efforts`, `defaultEffort`, `auxPurposes`, `auxLevel`, `autoScope` and `trace` are the ones most often changed.
+Override the `think-effort` row in the profile's `cordis.patch.yml`; the fields are listed in the Chinese section above. `declareCapability`, `efforts`, `defaultEffort`, `auxPurposes`, `auxLevel`, `autoScope`, `subagentLevel` and `trace` are the ones most often changed. Most users should use the visual settings page instead of editing this file.
 
 ### Compatibility
 
