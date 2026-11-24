@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 — 2026-11-24
+
+- `package.json` 增加有界宿主声明 `engines.dsh: ">=0.2.0-rc.1 <0.3.0-0"`，插件市场与插件管理器可据此判断兼容性。
+- 发布链路切换到 npm Trusted Publishing（OIDC + provenance），仓库不再保存 npm token。
+
 ## 0.2.0 — 2026-11-24
 
 更名：包名与目录改为 **`dsh-think-effort`**，插件行 id 改为 `think-effort`，日志前缀与内部符号同步改名。行为与配置字段不变。

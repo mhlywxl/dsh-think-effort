@@ -1,6 +1,6 @@
 {
   "name": "dsh-think-effort",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Automatic thinking depth for DeepSeek routes in DeepSeek Harness: declare the model's effort vocabulary, add Auto to the model selector, resolve it to the declared default, and drop cheap host-owned calls to Low.",
   "icon": "./icon.svg",
@@ -32,7 +32,8 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "dsh": ">=0.2.0-rc.1 <0.3.0-0"
   },
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
