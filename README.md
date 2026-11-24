@@ -50,7 +50,7 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
 
 ### 启用与验证
 
-1. **新安装不需要重启**：DSH 的 base bundle 默认启用 HMR，新 bundle 安装后直接激活（安装结果显示 `application: applied`）。打开 **插件** 页能看到「自动思考档位」即已生效；若页面是旧快照，刷新一次即可。
+1. **新安装不需要重启**：DSH 的 base bundle 默认启用 HMR，新 bundle 安装后直接激活（安装结果显示 `application: applied`）。打开 **插件** 页能看到「自动思考档位」即已生效；**设置** 面板的导航里也会多出同名入口。若页面是旧快照，刷新一次即可。
 2. 输入框右侧的模型 chip 应从 `deepseek-v4.1-flash-1017` 变成 `deepseek-v4.1-flash-1017 High`（或你模型的默认档）。
 3. 点开 chip →「推理等级」，应能看到 `Auto / Low / High / Max`。
 4. 想核对具体模型，可让 Agent 调用只读工具 `reasoning_effort_status`，它会报告该模型声明的档位、默认档、`Auto` 与子代理的解析结果、廉价调用档位，不发送任何模型请求。
@@ -59,16 +59,21 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
 
 ### 可视化设置
 
-**插件 → 自动思考档位 → 行右侧「配置」**（桌面/Web 相同）：
+同一条配置有**两个入口**，表单与写入完全相同，改哪个都一样：
 
-![设置页](docs/settings.png)
+- **设置 → 自动思考档位**（推荐）：侧栏底部「更多」→ 设置，左侧导航里紧跟「内置插件」，带仪表盘图标；
+- **插件 → 自动思考档位 → 行右侧「配置」**：正在浏览插件列表时顺手进入。
+
+![设置面板里的入口](docs/settings-section.png)
+
+![插件行的配置页](docs/settings.png)
 
 - **档位分配**：普通步骤的 Auto 落点、模型默认档、**子代理推理强度**、哪些模型显示 Auto；
 - **廉价调用**：总开关、档位、purpose 清单；
 - **能力声明**：是否写入 `reasoningEfforts`、声明哪些档位、DeepSeek host/模型匹配规则；
 - **高级**：stderr 诊断。
 
-所有字段都是 `volatile` 配置：点「保存」后**立即生效**，不需要重启，也不用改 `cordis.patch.yml`。
+所有字段都是 `volatile` 配置：点「保存」后**立即生效**，不需要重启，也不用改 `cordis.patch.yml`。「设置」里的入口只在 Host 提供该行设置命名空间时出现，卸载或关闭本插件后不留空页面。
 
 ### 本插件的第一次使用
 
@@ -193,7 +198,7 @@ Copy the `.tgz` (or an unpacked directory with `package.json` at its root) to th
 
 ### Enable and verify
 
-1. A **fresh install needs no restart**: the base bundle enables HMR, so a new bundle activates immediately (`application: applied`). The "Automatic thinking depth" card appears under **Plugins**; refresh the page if the list is stale.
+1. A **fresh install needs no restart**: the base bundle enables HMR, so a new bundle activates immediately (`application: applied`). The "Automatic thinking depth" card appears under **Plugins**, and **Settings** gains a navigation entry of the same name; refresh the page if the list is stale.
 2. The model chip next to the composer reads `<model> High` (the model's default depth) instead of the bare model id.
 3. Open the chip → "Reasoning level": `Auto / Low / High / Max` are listed.
 4. For a specific model, ask the agent to call the read-only `reasoning_effort_status` tool: it reports the declared depths, the default, what `Auto` and subagents resolve to, and the cheap-call depth, without sending a model request.
@@ -202,16 +207,21 @@ Copy the `.tgz` (or an unpacked directory with `package.json` at its root) to th
 
 ### Visual settings
 
-**Plugins → Automatic thinking depth → Configure** on the row (Desktop and Web):
+The same form is reachable from **two places**; both read and write the identical configuration:
 
-![Settings page](docs/settings.png)
+- **Settings → Automatic thinking depth** (recommended): sidebar foot → More → Settings; the entry sits right after "Built-in plugins" and carries a gauge icon;
+- **Plugins → Automatic thinking depth → Configure** on the row, when you are already browsing plugins.
+
+![The Settings entry](docs/settings-section.png)
+
+![The Plugins row configuration](docs/settings.png)
 
 - **Depth assignment**: the ordinary-step Auto target, the model default, the **subagent effort**, and which models offer Auto;
 - **Cheap calls**: switch, level, and purpose list;
 - **Capability declaration**: whether to write `reasoningEfforts`, which depths to declare, and the DeepSeek host/model rules;
 - **Advanced**: stderr diagnostics.
 
-Every field is `volatile`: **Save** applies immediately, without a restart and without hand-editing `cordis.patch.yml`.
+Every field is `volatile`: **Save** applies immediately, without a restart and without hand-editing `cordis.patch.yml`. The Settings entry exists only while the Host serves this row's settings namespace, so disabling or removing the plugin leaves no empty page behind.
 
 ### Features
 

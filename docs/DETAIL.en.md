@@ -14,9 +14,16 @@ Declarative thinking-depth control for DeepSeek (and other) reasoning models: th
 - Pick `Auto` in the model selector to state "use the default depth", or a concrete depth to pin it.
 - Leaving the depth unset (the native "provider default" row) behaves like `Auto` on ordinary steps — both land on the declared default; `Auto` only records the intent in the session. The cheap-call downgrade applies either way.
 - The recognized models, default depth and cheap-call list live in the plugin row's config (`think-effort` in `cordis.patch.yml`).
-- The visual settings page is preferred: **Plugins → Automatic thinking depth → Configure**. Every field is `volatile`, so Save applies immediately without a restart.
+- The visual settings page has **two entries**, both editing the same form: **Settings → Automatic thinking depth** (recommended), or **Plugins → Automatic thinking depth → Configure** on the row. Every field is `volatile`, so Save applies immediately without a restart.
 
-![Settings page](settings.png)
+![The Settings entry](settings-section.png)
+
+## Where the settings page comes from
+
+- The row page registers into the plugin manager's `plugins.row.config`, keyed `dsh-think-effort#think-effort`.
+- The Settings page registers into the settings panel's `settings.section` (same `id` `think-effort`, `order: 16`, right after the built-in Plugins section at 15); its glyph registers into `settings.section.icon` with the matching `id`.
+- A Settings section receives no form from its owner, so the page reads the **row's settings namespace** (the profile entry id, `think-effort`) through the `configForms` service. `whileServed(['think-effort'])` registers the entry only while the Host serves that namespace, so a deployment without the row never shows an empty page.
+- Both entries share one form controller inside `configForms`, so a save from either place is the same profile write.
 
 ## Limitations
 

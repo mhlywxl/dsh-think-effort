@@ -14,9 +14,16 @@
 - 在模型选择器里选 `Auto` 即声明「按默认档走」；选具体档位即固定该档位。
 - 不选任何档位（原生“提供方默认”）在普通步骤上与 `Auto` 等效，都会落到声明默认档；差别只是 `Auto` 把意图记录进会话。廉价调用的降档在任何情况下都生效。
 - 识别范围、默认档、廉价调用清单都在插件配置里（`cordis.patch.yml` 的 `think-effort` 行）。
-- 更推荐用可视化设置：**插件 → 自动思考档位 → 配置**，字段全部是 `volatile` 配置，保存后立即生效（无需重启）。
+- 可视化设置有**两个入口**，表单与写入相同：**设置 → 自动思考档位**（推荐），或**插件 → 自动思考档位 → 行「配置」**。字段全部是 `volatile` 配置，保存后立即生效（无需重启）。
 
-![设置页](settings.png)
+![设置面板里的入口](settings-section.png)
+
+## 设置页从哪里来
+
+- 插件行页面注册进插件管理器的 `plugins.row.config`，键为 `dsh-think-effort#think-effort`；
+- 设置页注册进设置面板的 `settings.section`（`id` 同为 `think-effort`，`order: 16`，紧跟 order 15 的内置插件），图标注册进 `settings.section.icon` 且 `id` 必须与之一致；
+- 设置页没有 owner 传入的表单，所以它从 `configForms` 服务读取**行设置命名空间**（即 profile 条目 id `think-effort`）。`whileServed(['think-effort'])` 保证只有 Host 正在提供该命名空间时才注册，页面不会在没有这一行的部署里留下空壳；
+- 两个入口共用 `configForms` 里同一个表单控制器，因此任一入口的保存都是同一次 profile 写入。
 
 ## 限制
 

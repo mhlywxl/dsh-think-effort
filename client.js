@@ -1,11 +1,20 @@
 /**
  * Browser half of `dsh-think-effort`: the visual settings page for one row.
  *
- * The page registers into the Plugins page's `plugins.row.config` slot, keyed
- * by `<package name>#<row id>`, so the bundle's row gains a Configure control.
+ * The page renders in two places, from one form:
+ *
+ * - the Plugins page's `plugins.row.config` slot, keyed by
+ *   `<package name>#<row id>`, so the bundle's row gains a Configure control;
+ * - the Settings panel's `settings.section` slot, so the same options are
+ *   reachable where a person looks for settings instead of only behind a
+ *   bundle row.
+ *
  * The page owner supplies `form`: the accepted Host values of this row plus one
  * revision-fenced `mutate`. Every field is volatile, so saving writes the
- * profile patch and the running policy follows without a restart.
+ * profile patch and the running policy follows without a restart. The Settings
+ * entry reads the row's settings namespace through `configForms` and exists
+ * only while the Host serves it, so a deployment without this row shows no
+ * trace of the page.
  *
  * The layout follows the desktop reference implementation: purpose rows
  * (ordinary step, subagent, cheap calls) over a shared effort vocabulary, with
@@ -20,11 +29,18 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
 
     const NS = 'think-effort';
-    const ROW_KEY = 'dsh-think-effort#think-effort';
+    /** The bundle row this page belongs to; the row id is also the Host settings namespace. */
+    const ROW_ID = 'think-effort';
+    const ROW_KEY = `dsh-think-effort#${ROW_ID}`;
+    /** Settings navigation section id; the shell pairs it with the icon of the same id. */
+    const SECTION_ID = 'think-effort';
+    /** Right after the built-in Plugins section (order 15): the plugin's own options. */
+    const SECTION_ORDER = 16;
     const EFFORT_ORDER = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
     const KNOWN_PURPOSES = ['session-title', 'compaction', 'auto-review'];
 
     const zh = {
+      nav: '自动思考档位',
       intro: '按“用途”分配推理强度：普通步骤、子代理、Harness 自己的廉价调用。改动即时生效，不需要重启。',
       loading: '正在读取插件配置…',
       unavailable: '这个部署没有提供可编辑的插件配置（设置服务未挂载，或该行没有可实时编辑的字段）。',
@@ -88,6 +104,7 @@ window.__ModuleLoader__.load({
     };
 
     const en = {
+      nav: 'Automatic thinking depth',
       intro: 'Assign thinking depth by purpose: ordinary steps, subagents, and the Harness\'s own cheap calls. Changes apply immediately, without a restart.',
       loading: 'Reading plugin configuration…',
       unavailable: 'This deployment exposes no editable plugin configuration (the settings service is not mounted, or this row has no live fields).',
@@ -624,6 +641,37 @@ window.__ModuleLoader__.load({
       return t('summary', { auto, sub, aux });
     }
 
+    /**
+     * The Settings panel's copy of the page.
+     *
+     * The Plugins page receives `form` from its row owner; a Settings section
+     * is owned by the shell and receives only `close`, so this copy reads the
+     * row's settings form from the `configForms` service. Both surfaces share
+     * that one form, so an edit belongs to the same profile write either way.
+     */
+    function SettingsSection({ useConfig, mutate, t }) {
+      const state = useConfig((snapshot) => snapshot);
+      const form = React.useMemo(() => ({ state, mutate }), [state, mutate]);
+      return Page({ form, t });
+    }
+
+    /** Settings navigation glyph: a gauge arc with a needle, matching the bundle icon's motif. */
+    function SectionIcon({ size }) {
+      return h('svg', {
+        viewBox: '0 0 24 24',
+        width: size,
+        height: size,
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.8,
+        strokeLinecap: 'round',
+        'aria-hidden': 'true',
+      },
+        h('path', { d: 'M4.5 16.5a7.5 7.5 0 1 1 15 0' }),
+        h('path', { d: 'M12 16.5 16 11.5' }),
+        h('circle', { cx: 12, cy: 16.5, r: 1.6, fill: 'currentColor', stroke: 'none' }));
+    }
+
     function apply(ctx) {
       const locale = ctx.get('locale');
       if (locale !== undefined) {
@@ -648,8 +696,41 @@ window.__ModuleLoader__.load({
         }, (props) => props.view === 'summary'
         ? Summary({ form: props.form, t })
         : Page({ form: props.form, t })));
+      // The same form under Settings: a bundle row alone is too hidden a home
+      // for a plugin's options. The entry exists only while the Host serves
+      // this row's settings namespace, so a profile without the row (or one
+      // whose row exposes no volatile fields) shows no trace of the page.
+      ctx.effect(() => ctx.configForms.whileServed([ROW_ID], () => {
+        const form = ctx.configForms.get(ROW_ID);
+        const offSection = slots.inject('settings.section', () => slots.register({
+          name: 'settings.section',
+          id: SECTION_ID,
+          order: SECTION_ORDER,
+          label: () => t('nav'),
+          locale: NS,
+          inject: () => ({
+            mutate: (ops, revision) => form.mutate(ops, revision),
+            hooks: {
+              config: {
+                getSnapshot: () => form.getSnapshot(),
+                subscribe: (listener) => form.subscribe(listener),
+              },
+            },
+            t,
+          }),
+        }, SettingsSection));
+        const offIcon = slots.inject('settings.section.icon', () => slots.register({
+          name: 'settings.section.icon',
+          id: SECTION_ID,
+          locale: NS,
+        }, SectionIcon));
+        return () => {
+          offSection();
+          offIcon();
+        };
+      }), 'think-effort: settings entry');
     }
 
-    return { inject: ['slots', 'locale'], apply };
+    return { inject: ['slots', 'locale', 'configForms'], apply };
   },
 });
