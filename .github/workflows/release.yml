@@ -91,6 +91,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           REPO_URL: ${{ steps.meta.outputs.repository }}
+          NPM_CONFIG_LOGLEVEL: verbose
         run: |
           set -euo pipefail
           pkg="$(node --input-type=module -e 'import { readFileSync } from "node:fs"; process.stdout.write(JSON.parse(readFileSync("package.json", "utf8")).name)')"
@@ -111,7 +112,19 @@ jobs:
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
             echo "::warning::NPM_TOKEN is not set; falling back to npm trusted publishing (OIDC)."
           fi
+          set +e
           npm publish --provenance --access public
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::group::npm debug log (OIDC diagnostics)"
+            debuglog="$(ls -t "${HOME}/.npm/_logs"/*-debug-0.log 2>/dev/null | head -1)"
+            if [ -n "${debuglog}" ]; then
+              grep -E "oidc|error|verbose stack|npm error" "${debuglog}" | tail -n 60 || true
+            fi
+            echo "::endgroup::"
+            exit "$status"
+          fi
           echo "published=true" >> "$GITHUB_OUTPUT"
           {
             echo "## npm"
