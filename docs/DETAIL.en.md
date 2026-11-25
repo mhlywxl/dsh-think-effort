@@ -8,6 +8,7 @@ Declarative thinking-depth control for DeepSeek (and other) reasoning models: th
 2. **Offers `Auto`.** One `Auto` entry is prepended to the model's depth list.
 3. **Resolves per request.** At the adapter boundary `auto` becomes the declared default; a request whose `purpose` is a cheap host-owned call becomes `low` when the model declares it — regardless of the session's own choice, because those bounded calls never inherit it; a manually picked depth passes through untouched and is validated by DSH itself.
 4. **Subagent depth.** A subagent effort can be pinned (`inherit` / `auto` / `low`…`max`). `inherit` keeps DSH's native inheritance; a fixed depth overrides the child's own or inherited pick, while a cheap-call downgrade still wins.
+5. **Live debug log.** An optional floating window shows every request's effort decision (requested → sent), subagent sessions included. It records only; it never changes a request.
 
 ## Usage
 
@@ -17,6 +18,17 @@ Declarative thinking-depth control for DeepSeek (and other) reasoning models: th
 - The visual settings page has **two entries**, both editing the same form: **Settings → Automatic thinking depth** (recommended), or **Plugins → Automatic thinking depth → Configure** on the row. Every field is `volatile`, so Save applies immediately without a restart.
 
 ![The Settings entry](settings-section.png)
+
+## Live debug log
+
+Turn on **Debug → Show the live effort-switch log in the conversation** and a movable window (the `shell.overlay` seat) appears at the conversation's bottom-right corner, showing:
+
+- each model request's time, purpose, requested depth, the depth actually sent, and the model;
+- subagent sessions' decisions (with a `Sub` badge) — a subagent runs in the same Host process and therefore shares the one journal;
+- `Settings update` and `Capability declared` events, so a save's effect is visible;
+- filters for this session, all sessions, and switches only, plus one-click copy.
+
+Two halves: the Host half appends each decision, at the adapter boundary, to an **in-memory ring buffer** (300 records at most, never written to the session log or disk) and serves it through two `webServer` routes — a cursor-based read and a clear; the browser half polls only while the switch is on, and keeps the window's position and open state in browser storage. With the switch off the routes answer `enabled: false`, the window disappears, and recording stops.
 
 ## Where the settings page comes from
 
@@ -48,6 +60,7 @@ Declarative thinking-depth control for DeepSeek (and other) reasoning models: th
 | `auxLevel` | `low` | Depth those calls request |
 | `autoScope` | `all` | `all` / `declared` / `off` |
 | `subagentLevel` | `inherit` | Subagent depth: `inherit` / `auto` / a fixed depth; a fixed depth overrides the child's own or inherited pick |
+| `debugOverlay` | `false` | Live effort-switch log over the conversation (records only, never rewrites; 300 records in Host memory) |
 | `trace` | `false` | Write decisions to stderr for diagnosis |
 
 ## Diagnostic tool

@@ -55,6 +55,7 @@ function fakeHost({ section = PI_AI_SECTION, adapter }) {
   const updates = [];
   const listeners = new Map();
   const cleanups = [];
+  const routes = new Map();
   const adapters = new Map([['aigw-coding', { provider: { id: 'aigw-coding' }, adapter, retryPolicy: {} }]]);
   const settings = {
     describe: () => [{ ns: 'llm-pi-ai', value: section, revision: 7 + updates.length }],
@@ -66,6 +67,13 @@ function fakeHost({ section = PI_AI_SECTION, adapter }) {
     },
   };
   const agents = { list: () => [], get: () => undefined };
+  const webServer = {
+    register(route) {
+      routes.set(route.path, route);
+      return () => routes.delete(route.path);
+    },
+  };
+  const tools = { register: () => () => {} };
   const ctx = {
     logger: { info() {}, warn() {} },
     get(name) {
@@ -82,6 +90,19 @@ function fakeHost({ section = PI_AI_SECTION, adapter }) {
       cleanups.push(fn());
       return () => {};
     },
+    inject(deps, callback) {
+      const scope = {
+        get: (name) => ctx.get(name),
+        effect(fn) {
+          cleanups.push(fn());
+          return () => {};
+        },
+        tools,
+        webServer,
+      };
+      callback(scope);
+      return () => {};
+    },
     emit(name, ...args) {
       listeners.get(name)?.(...args);
     },
@@ -89,7 +110,23 @@ function fakeHost({ section = PI_AI_SECTION, adapter }) {
       for (const cleanup of cleanups) cleanup();
     },
   };
-  return { ctx, updates, adapters, agents, settings };
+  return { ctx, updates, adapters, agents, settings, routes };
+}
+
+/** Invoke one raw route handler and decode its JSON answer. */
+function callRoute(route, { method = 'GET', url = '/think-effort/debug', headers = {} } = {}) {
+  const chunks = [];
+  let status = 0;
+  const response = {
+    writeHead(nextStatus) {
+      status = nextStatus;
+    },
+    end(text) {
+      if (typeof text === 'string' && text !== '') chunks.push(text);
+    },
+  };
+  route.handler({ method, url, headers }, response);
+  return { status, body: chunks.length > 0 ? JSON.parse(chunks.join('')) : null };
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -250,11 +287,13 @@ test('the exported Config accepts the documented defaults and keeps fields live'
   assert.equal(typeof parsed.enabled.get, 'function');
   assert.equal(parsed.enabled.get(), true);
   assert.equal(parsed.subagentLevel.get(), 'inherit');
+  assert.equal(parsed.debugOverlay.get(), false);
   assert.deepEqual(parsed.efforts.get(), ['low', 'high', 'max']);
-  const custom = Config({ subagentLevel: 'high', efforts: ['low', 'high'], auxDowngrade: false });
+  const custom = Config({ subagentLevel: 'high', efforts: ['low', 'high'], auxDowngrade: false, debugOverlay: true });
   assert.equal(custom.subagentLevel.get(), 'high');
   assert.deepEqual(custom.efforts.get(), ['low', 'high']);
   assert.equal(custom.auxDowngrade.get(), false);
+  assert.equal(custom.debugOverlay.get(), true);
 });
 
 test('subagent sessions are recognised from the durable session header', () => {
@@ -264,4 +303,84 @@ test('subagent sessions are recognised from the durable session header', () => {
   assert.equal(isSubagentAgent({ session: { header: { origin: 'subagent' } } }), true);
   assert.equal(isSubagentAgent({ session: { header: { delegationDepth: 2 } } }), true);
   assert.equal(isSubagentAgent({ session: { header: { delegationDepth: 0 } } }), false);
+});
+
+test('the debug switch records each decision for the browser half', async () => {
+  const adapter = fakeAdapter(['low', 'high', 'max']);
+  const host = fakeHost({ adapter });
+  host.agents.get = (id) => (id === 'child-1'
+    ? { session: { header: { id: 'child-1', origin: 'subagent', delegationDepth: 1, parentSession: 'root-1' } } }
+    : undefined);
+  apply(host.ctx, { debugOverlay: true });
+  await tick();
+  await tick();
+  const prepared = await host.adapters.get('aigw-coding').adapter.prepareCall('aigw-coding', 'deepseek-v4.1-flash-1017');
+
+  // Ordinary Auto, a subagent Auto, then an explicit pick that needs no rewrite.
+  prepared.stream({ reasoningEffort: 'auto', purpose: 'agent', sessionId: 'root-1' });
+  prepared.stream({ reasoningEffort: 'auto', purpose: 'agent', sessionId: 'child-1' });
+  // No purpose: an ordinary agent step. The journal names it instead of
+  // recording "unknown".
+  prepared.stream({ reasoningEffort: 'low', sessionId: 'root-1' });
+
+  const route = host.routes.get('/think-effort/debug');
+  assert.ok(route, 'the debug route is registered through the webServer injection');
+  const answer = callRoute(route, { url: '/think-effort/debug?since=0' });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.body.enabled, true);
+  const requests = answer.body.entries.filter((entry) => entry.kind === 'request');
+  assert.equal(requests.length, 3);
+
+  const [rootAuto, childAuto, rootExplicit] = requests;
+  assert.equal(rootAuto.sessionId, 'root-1');
+  assert.equal(rootAuto.subagent, false);
+  assert.equal(rootAuto.requested, 'auto');
+  assert.equal(rootAuto.applied, 'high');
+  assert.equal(rootAuto.switched, true);
+  assert.equal(rootAuto.from, null);
+
+  assert.equal(childAuto.sessionId, 'child-1');
+  assert.equal(childAuto.subagent, true);
+  assert.equal(childAuto.parentSession, 'root-1');
+  assert.equal(childAuto.rootSessionId, 'root-1');
+  assert.equal(childAuto.applied, 'high');
+
+  assert.equal(rootExplicit.purpose, 'agent');
+  assert.equal(rootExplicit.requested, 'low');
+  assert.equal(rootExplicit.applied, 'low');
+  assert.equal(rootExplicit.switched, false, 'a passed-through pick is not a plugin switch');
+  assert.equal(rootExplicit.from, 'high');
+  assert.equal(rootExplicit.changed, true, 'it did change the session\'s previous level');
+
+  // A cursor only returns later records; the boot capability write may sit
+  // before the requests, so the cursor comes from the answer, not a literal.
+  const tail = callRoute(route, { url: `/think-effort/debug?since=${answer.body.latest}` });
+  assert.deepEqual(tail.body.entries.map((entry) => entry.seq), []);
+});
+
+test('the debug switch stays inert while off and follows a volatile save', async () => {
+  const adapter = fakeAdapter(['low', 'high', 'max']);
+  const host = fakeHost({ adapter });
+  const debugOverlay = volatileRef(false);
+  apply(host.ctx, { debugOverlay });
+  await tick();
+  await tick();
+  const prepared = await host.adapters.get('aigw-coding').adapter.prepareCall('aigw-coding', 'deepseek-v4.1-flash-1017');
+  prepared.stream({ reasoningEffort: 'auto', purpose: 'agent' });
+
+  const route = host.routes.get('/think-effort/debug');
+  const off = callRoute(route);
+  assert.equal(off.body.enabled, false);
+  assert.deepEqual(off.body.entries, []);
+
+  // Turning the switch on applies to the next request and records the save.
+  debugOverlay.set(true);
+  host.ctx.emit('loader/volatile-update');
+  prepared.stream({ reasoningEffort: 'auto', purpose: 'agent' });
+  const on = callRoute(route);
+  assert.equal(on.body.enabled, true);
+  const kinds = on.body.entries.map((entry) => entry.kind);
+  assert.deepEqual(kinds, ['config', 'request']);
+  assert.equal(on.body.entries[0].debugOverlay, true);
+  assert.equal(on.body.entries[1].applied, 'high');
 });

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 — 2026-11-24
+
+- **实时调试悬浮窗**：设置页新增「调试」区块与 `debugOverlay` 开关（默认关）。打开后，会话右下角出现可拖动的悬浮窗（`shell.overlay` 槽位），实时显示每次模型请求的档位决策：时间、用途、请求档位 → 实际发送档位、模型，以及子代理会话（带「子」标记）和 `设置更新` / `能力声明` 事件；支持「当前会话 / 全部会话 / 仅切换」筛选、一键复制、清空，窗口位置与展开状态在浏览器本地保存。
+- **只记录、不改变请求**：Host 半边在适配器边界把每条决策写入内存环形缓冲（最多 300 条，不写会话日志、不落盘），经两条 `webServer` 路由（`GET /think-effort/debug?since=N`、`POST /think-effort/debug/clear`）提供增量读取与清空；开关关闭时路由返回 `enabled: false` 且不记录。
+- 设置页原来的「高级」disclosure 改为「调试」区块，`trace`（stderr 诊断）移入其中。
+- 测试：40 项全绿（新增调试日志 ring buffer/路由/清空契约、Host 决策记录、开关热更新、客户端悬浮窗注册与双语文案）。
+- 文档：README / DETAIL（中英）新增悬浮窗说明与截图（`docs/debug-settings.png`、`docs/debug-overlay.png`）；`cordis.patch.yml` 与配置表补 `debugOverlay`。
+
 ## 0.4.0 — 2026-11-24
 
 - **设置里多一个入口**：同一条配置现在注册进 DSH 设置面板的 `settings.section`（导航项「自动思考档位」，紧跟「内置插件」），并带一个仪表盘图标的 `settings.section.icon`。以前只能从「插件 → 自动思考档位 → 行 → 配置」进入，入口太深；两处共用同一份表单与同一次写入。

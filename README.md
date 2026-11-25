@@ -2,7 +2,7 @@
 
 **中文（默认）** · [English](#english)
 
-给 DeepSeek Harness（DSH）加一套**声明式自动思考档位**：模型选择器里出现 `Auto`，普通步骤落到模型声明的默认档（DeepSeek 为 `high`），会话标题、上下文压缩、自动复审这类由 Harness 自己发起的廉价调用自动用 `low`。
+给 DeepSeek Harness（DSH）加一套**声明式自动思考档位**：模型选择器里出现 `Auto`，普通步骤落到模型声明的默认档（DeepSeek 为 `high`），会话标题、上下文压缩、自动复审这类由 Harness 自己发起的廉价调用自动用 `low`。打开调试开关后，每次请求的档位决策会实时出现在会话界面的悬浮窗里，子代理的决策也在其中。
 
 ## 快速开始
 
@@ -71,9 +71,25 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
 - **档位分配**：普通步骤的 Auto 落点、模型默认档、**子代理推理强度**、哪些模型显示 Auto；
 - **廉价调用**：总开关、档位、purpose 清单；
 - **能力声明**：是否写入 `reasoningEfforts`、声明哪些档位、DeepSeek host/模型匹配规则；
-- **高级**：stderr 诊断。
+- **调试**：会话界面的实时档位切换日志、stderr 诊断。
 
 所有字段都是 `volatile` 配置：点「保存」后**立即生效**，不需要重启，也不用改 `cordis.patch.yml`。「设置」里的入口只在 Host 提供该行设置命名空间时出现，卸载或关闭本插件后不留空页面。
+
+### 实时调试悬浮窗
+
+设置页的「调试 → 在会话界面显示实时档位切换日志」打开后，会话右下角会出现一个可拖动的小窗口：
+
+![设置页里的调试开关](docs/debug-settings.png)
+
+![实时档位切换日志](docs/debug-overlay.png)
+
+- **每次请求都记一条**：时间、用途（普通步骤 / 会话标题 / 压缩 / 自动复核）、请求档位（`Auto` 或具体档）、实际发送档位，以及模型；
+- **子代理单独标记**：子代理会话由同一个 Host 处理，因此它的决策也在同一个窗口里，带「子」标记；
+- **切换直观可见**：插件真正改写了档位（如 `auto → high`）的行高亮；同一会话同一用途的档位发生变化时，行尾出现 `⇄`；
+- **筛选与复制**：可在「当前会话 / 全部会话 / 仅切换」之间切换，一键复制为文本，方便贴到 issue；
+- **只记录、不改变请求**：关掉开关后日志立即停止记录，窗口消失；记录只存在 Host 内存里（最多 300 条），不写会话日志、不落盘。
+
+窗口位置与展开状态记在浏览器本地，刷新页面后保持原样；「设置更新」「能力声明」也会作为事件出现在日志里，方便确认保存是否生效。
 
 ### 本插件的第一次使用
 
@@ -122,6 +138,7 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
     auxLevel: low
     autoScope: all
     subagentLevel: inherit
+    debugOverlay: false
     trace: false
 ```
 
@@ -140,6 +157,7 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
 | `auxLevel` | `low` | 廉价调用用的档位 |
 | `autoScope` | `all` | `all` / `declared` / `off` |
 | `subagentLevel` | `inherit` | 子代理档位：`inherit` / `auto` / `low`…`max`；固定档会覆盖子代理自身或继承的选择 |
+| `debugOverlay` | `false` | 在会话界面显示实时档位切换日志（只记录，不改请求） |
 | `trace` | `false` | 把决策写到 stderr（排查用） |
 
 ## 兼容性
@@ -158,7 +176,7 @@ MIT。
 
 **中文简介**：给 DeepSeek Harness 加一套声明式自动思考档位——`Auto` 落到模型声明的默认档，廉价调用自动用低档。
 
-Declarative automatic thinking depth for DeepSeek Harness: the model selector gains `Auto`, normal steps use the model's declared default depth (`high` on DeepSeek), and cheap host-owned calls — session titles, compaction, auto-review — drop to `low`.
+Declarative automatic thinking depth for DeepSeek Harness: the model selector gains `Auto`, normal steps use the model's declared default depth (`high` on DeepSeek), and cheap host-owned calls — session titles, compaction, auto-review — drop to `low`. Turn on the debug switch and every request's effort decision appears live in a floating window over the conversation, subagent decisions included.
 
 ### Quick start
 
@@ -219,9 +237,25 @@ The same form is reachable from **two places**; both read and write the identica
 - **Depth assignment**: the ordinary-step Auto target, the model default, the **subagent effort**, and which models offer Auto;
 - **Cheap calls**: switch, level, and purpose list;
 - **Capability declaration**: whether to write `reasoningEfforts`, which depths to declare, and the DeepSeek host/model rules;
-- **Advanced**: stderr diagnostics.
+- **Debug**: the conversation's live effort-switch log and stderr diagnostics.
 
 Every field is `volatile`: **Save** applies immediately, without a restart and without hand-editing `cordis.patch.yml`. The Settings entry exists only while the Host serves this row's settings namespace, so disabling or removing the plugin leaves no empty page behind.
+
+### Live debug window
+
+Turn on **Debug → Show the live effort-switch log in the conversation** and a movable window appears at the conversation's bottom-right corner:
+
+![The debug switch in Settings](docs/debug-settings.png)
+
+![The live effort-switch log](docs/debug-overlay.png)
+
+- **One line per request**: time, purpose (ordinary step / session title / compaction / auto-review), requested depth (`Auto` or an explicit level), the depth actually sent, and the model;
+- **Subagents are marked**: subagent sessions run in the same Host process, so their decisions land in the same window with a `Sub` badge;
+- **Switches stand out**: rows the plugin actually rewrote (for example `auto → high`) are highlighted, and a level change for the same session and purpose is marked `⇄`;
+- **Filter and copy**: switch between this session, all sessions, and switches only; copy the log as text for an issue report;
+- **Records only, never rewrites**: turning the switch off stops recording and hides the window; the journal lives in Host memory (300 records at most) and never touches the session log or disk.
+
+The window's position and open state persist in the browser, so a page refresh keeps them. Settings updates and capability declarations also appear as events, which makes a save's effect easy to confirm.
 
 ### Features
 
@@ -230,10 +264,11 @@ Every field is `volatile`: **Save** applies immediately, without a restart and w
 - **Subagent effort**: `inherit` keeps DSH's native behavior; `auto` follows this plugin's default; a fixed depth overrides the child's own or inherited pick.
 - Cheap host-owned calls (`session-title`, `compaction`, `auto-review`) drop to `low` only when the model declares it, regardless of the session's own choice.
 - Idempotent: a second boot writes nothing; unload restores the original adapter registrations and retires a durable `auto`.
+- **Live debug window**: an opt-in, bounded, in-memory journal served over a Host route and rendered as a movable log over the conversation, subagent decisions included.
 
 ### Configuration
 
-Override the `think-effort` row in the profile's `cordis.patch.yml`; the fields are listed in the Chinese section above. `declareCapability`, `efforts`, `defaultEffort`, `auxPurposes`, `auxLevel`, `autoScope`, `subagentLevel` and `trace` are the ones most often changed. Most users should use the visual settings page instead of editing this file.
+Override the `think-effort` row in the profile's `cordis.patch.yml`; the fields are listed in the Chinese section above. `declareCapability`, `efforts`, `defaultEffort`, `auxPurposes`, `auxLevel`, `autoScope`, `subagentLevel`, `debugOverlay` and `trace` are the ones most often changed. Most users should use the visual settings page instead of editing this file.
 
 ### Compatibility
 

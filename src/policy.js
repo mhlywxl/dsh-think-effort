@@ -92,6 +92,8 @@ export const DEFAULT_CONFIG = {
    * id forces that depth (clamped to the model's declared vocabulary).
    */
   subagentLevel: 'inherit',
+  /** Record every effort decision for the conversation's floating debug log. */
+  debugOverlay: false,
   /** Diagnostic stderr trace of each decision. */
   trace: false,
 };

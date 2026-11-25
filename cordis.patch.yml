@@ -43,3 +43,7 @@
         autoScope: all
         # Subagent calls: inherit | auto | low/high/max. Applies immediately.
         subagentLevel: inherit
+        # Record every effort decision for the conversation's floating debug
+        # log (Settings -> Automatic thinking depth -> Debug). Off by default;
+        # turning it on never changes a request.
+        debugOverlay: false

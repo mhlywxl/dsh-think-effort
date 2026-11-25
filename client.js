@@ -36,6 +36,12 @@ window.__ModuleLoader__.load({
     const SECTION_ID = 'think-effort';
     /** Right after the built-in Plugins section (order 15): the plugin's own options. */
     const SECTION_ORDER = 16;
+    /** Host route that serves the opt-in debug journal (see `src/debug.js`). */
+    const DEBUG_PATH = '/think-effort/debug';
+    const DEBUG_CLEAR_PATH = '/think-effort/debug/clear';
+    /** The overlay's localStorage keys: a reopened page keeps the reader's window. */
+    const DEBUG_OPEN_KEY = 'dte.debug.open';
+    const DEBUG_POS_KEY = 'dte.debug.pos';
     const EFFORT_ORDER = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
     const KNOWN_PURPOSES = ['session-title', 'compaction', 'auto-review'];
 
@@ -85,9 +91,37 @@ window.__ModuleLoader__.load({
       patternHint: '网关别名用，例如 ^deepseek；不区分大小写。',
       declareModelsRow: '额外声明',
       declareModelsHint: '每行一个 provider/model，或一个模型 ID 正则；用于没有匹配到上面两条规则的网关。',
-      advanced: '高级',
-      traceRow: '把每次决策写到 stderr',
-      traceHint: '排查用；默认关闭。',
+      debugSection: '调试',
+      debugSectionHint: '调试只记录、不改变任何请求：打开后，每次模型请求的档位决策都会实时出现在会话界面的悬浮窗里。',
+      debugOverlayRow: '在会话界面显示实时档位切换日志',
+      debugOverlayHint: '会话右下角出现悬浮调试窗：每条模型请求的用途、请求档位和实际发送档位都会实时记录，包括子代理会话和 Harness 的廉价调用。',
+      debugTraceRow: '同时把决策写到 Host 的 stderr',
+      debugTraceHint: '给开发者排查用；普通使用不需要。',
+      debugPill: '档位调试',
+      debugTitle: '思考档位 · 实时切换日志',
+      debugLive: '记录中',
+      debugPaused: '未开启',
+      debugEmpty: '等待下一次模型请求…',
+      debugDisabledOnHost: '表单已打开调试，但 Host 还没有注册调试接口。完全退出并重新打开 DeepSeek Harness 后生效。',
+      debugLoadFailed: '读取调试日志失败：',
+      debugClear: '清空',
+      debugCopy: '复制',
+      debugCopied: '已复制',
+      debugCollapse: '收起',
+      debugFilterCurrent: '当前会话',
+      debugFilterAll: '全部会话',
+      debugFilterSwitched: '仅切换',
+      debugCount: '共 {n} 条',
+      debugSubagent: '子',
+      debugKindConfig: '设置更新',
+      debugKindCapability: '能力声明',
+      debugModelDefault: '模型默认',
+      debugPurposeAgent: '普通步骤',
+      debugPurposeTitle: '会话标题',
+      debugPurposeCompaction: '压缩',
+      debugPurposeReview: '自动复核',
+      debugUnknown: '未知',
+      debugSwitch: '切换',
       enabledRow: '启用插件',
       enabledHint: '总开关；关闭后不注入 Auto、不改写任何请求。',
       summary: 'Auto → {auto} · 子代理 → {sub} · 廉价调用 → {aux}',
@@ -149,9 +183,37 @@ window.__ModuleLoader__.load({
       patternHint: 'For gateway aliases, such as ^deepseek; case insensitive.',
       declareModelsRow: 'Extra declarations',
       declareModelsHint: 'One provider/model per line, or a model-id regular expression, for gateways the rules above miss.',
-      advanced: 'Advanced',
-      traceRow: 'Write every decision to stderr',
-      traceHint: 'Diagnostics only; off by default.',
+      debugSection: 'Debug',
+      debugSectionHint: 'Debugging records but never changes a request: when on, every effort decision appears live in a floating log over the conversation.',
+      debugOverlayRow: 'Show the live effort-switch log in the conversation',
+      debugOverlayHint: 'A floating debug window appears at the conversation\'s bottom-right corner: each model request\'s purpose, requested depth, and the depth actually sent, including subagent sessions and the Harness\'s cheap calls.',
+      debugTraceRow: 'Also write decisions to the Host\'s stderr',
+      debugTraceHint: 'For developer diagnostics; not needed for normal use.',
+      debugPill: 'Effort debug',
+      debugTitle: 'Thinking depth · live switch log',
+      debugLive: 'Recording',
+      debugPaused: 'Off',
+      debugEmpty: 'Waiting for the next model request…',
+      debugDisabledOnHost: 'The form has debugging on, but the Host has not registered the debug route. Quit and reopen DeepSeek Harness to load it.',
+      debugLoadFailed: 'Could not read the debug log: ',
+      debugClear: 'Clear',
+      debugCopy: 'Copy',
+      debugCopied: 'Copied',
+      debugCollapse: 'Collapse',
+      debugFilterCurrent: 'This session',
+      debugFilterAll: 'All sessions',
+      debugFilterSwitched: 'Switches only',
+      debugCount: '{n} entries',
+      debugSubagent: 'Sub',
+      debugKindConfig: 'Settings update',
+      debugKindCapability: 'Capability declared',
+      debugModelDefault: 'model default',
+      debugPurposeAgent: 'Ordinary step',
+      debugPurposeTitle: 'Session title',
+      debugPurposeCompaction: 'Compaction',
+      debugPurposeReview: 'Auto-review',
+      debugUnknown: 'Unknown',
+      debugSwitch: 'switched',
       enabledRow: 'Enable this plugin',
       enabledHint: 'Master switch; when off, no Auto is injected and no request is rewritten.',
       summary: 'Auto → {auto} · Subagent → {sub} · Cheap calls → {aux}',
@@ -176,7 +238,7 @@ window.__ModuleLoader__.load({
     const FIELDS = [
       'enabled', 'declareCapability', 'deepseekHosts', 'deepseekModelPattern',
       'declareModels', 'efforts', 'defaultEffort', 'autoLevel', 'autoScope',
-      'auxDowngrade', 'auxPurposes', 'auxLevel', 'subagentLevel', 'trace',
+      'auxDowngrade', 'auxPurposes', 'auxLevel', 'subagentLevel', 'debugOverlay', 'trace',
     ];
 
     function equal(a, b) {
@@ -264,6 +326,36 @@ window.__ModuleLoader__.load({
         .dte-details > summary { cursor: pointer; padding: 11px 14px; font-weight: 600; }
         .dte-details[open] > summary { border-bottom: 1px solid var(--dsw-alias-border-l1); }
         .dte-details .dte-row:first-of-type { border-top: 0; }
+        .dte-dbg-pill { position: fixed; right: 18px; bottom: 92px; z-index: 70; display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; background: var(--dsw-alias-bg-overlay); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, .16); pointer-events: auto; }
+        .dte-dbg-pill-count { min-width: 18px; padding: 0 5px; border-radius: 999px; background: color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, transparent); color: var(--dsw-alias-brand-primary); font-variant-numeric: tabular-nums; }
+        .dte-dbg-card { position: fixed; right: 18px; bottom: 92px; z-index: 71; display: flex; flex-direction: column; width: min(440px, calc(100vw - 32px)); max-height: min(52vh, 480px); border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px; background: var(--dsw-alias-bg-overlay); color: var(--dsw-alias-label-primary); box-shadow: 0 16px 40px rgba(0, 0, 0, .22); pointer-events: auto; overflow: hidden; }
+        .dte-dbg-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-2); cursor: grab; user-select: none; }
+        .dte-dbg-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-state-idle-primary); flex: none; }
+        .dte-dbg-dot-live { background: var(--dsw-alias-state-success-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-success-primary) 22%, transparent); }
+        .dte-dbg-title { font-size: 12px; font-weight: 600; }
+        .dte-dbg-count { font-size: 11px; color: var(--dsw-alias-label-secondary); }
+        .dte-dbg-head-actions { margin-left: auto; display: flex; gap: 4px; }
+        .dte-dbg-btn { border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); font: inherit; font-size: 11px; padding: 2px 7px; cursor: pointer; }
+        .dte-dbg-btn:hover { color: var(--dsw-alias-label-primary); }
+        .dte-dbg-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 7px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1); }
+        .dte-dbg-chip { border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; padding: 2px 9px; font-size: 11px; cursor: pointer; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-secondary); }
+        .dte-dbg-chip-on { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
+        .dte-dbg-body { flex: 1 1 auto; min-height: 64px; overflow: auto; padding: 4px 0; }
+        .dte-dbg-row { padding: 5px 12px; border-left: 2px solid transparent; font-size: 11px; }
+        .dte-dbg-row + .dte-dbg-row { border-top: 1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 55%, transparent); }
+        .dte-dbg-row-switched { border-left-color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, transparent); }
+        .dte-dbg-line { display: flex; align-items: baseline; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; overflow: hidden; }
+        .dte-dbg-time { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
+        .dte-dbg-badge { flex: none; border-radius: 4px; padding: 0 4px; font-size: 10px; background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 18%, transparent); color: var(--dsw-alias-state-warn-primary); }
+        .dte-dbg-purpose { flex: none; color: var(--dsw-alias-label-secondary); }
+        .dte-dbg-levels { overflow: hidden; text-overflow: ellipsis; }
+        .dte-dbg-levels b { color: var(--dsw-alias-brand-primary); font-weight: 600; }
+        .dte-dbg-meta { display: flex; gap: 8px; margin-top: 1px; font-size: 10px; color: var(--dsw-alias-label-secondary); white-space: nowrap; overflow: hidden; }
+        .dte-dbg-meta span { overflow: hidden; text-overflow: ellipsis; }
+        .dte-dbg-empty { padding: 14px 12px; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+        .dte-dbg-note { padding: 8px 12px; font-size: 11px; color: var(--dsw-alias-state-warn-primary); }
+        .dte-dbg-foot { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--dsw-alias-border-l1); font-size: 10px; color: var(--dsw-alias-label-secondary); }
+        .dte-dbg-foot-flash { color: var(--dsw-alias-state-success-primary); }
         @media (max-width: 720px) {
           .dte-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
           .dte-row-hint { grid-column: 1; }
@@ -615,14 +707,24 @@ window.__ModuleLoader__.load({
             }),
           ],
         }),
-        h('details', { className: 'dte-details' },
-          h('summary', null, t('advanced')),
-          Row({
-            key: 'trace',
-            label: t('traceRow'),
-            hint: t('traceHint'),
-            children: Switch({ checked: current.trace === true, disabled: busy, label: current.trace === true ? t('on') : t('off'), onChange: (next) => patch('trace', next) }),
-          })),
+        Section({
+          title: t('debugSection'),
+          hint: t('debugSectionHint'),
+          children: [
+            Row({
+              key: 'debugOverlay',
+              label: t('debugOverlayRow'),
+              hint: t('debugOverlayHint'),
+              children: Switch({ checked: current.debugOverlay === true, disabled: busy, label: current.debugOverlay === true ? t('on') : t('off'), onChange: (next) => patch('debugOverlay', next) }),
+            }),
+            Row({
+              key: 'trace',
+              label: t('debugTraceRow'),
+              hint: t('debugTraceHint'),
+              children: Switch({ checked: current.trace === true, disabled: busy, label: current.trace === true ? t('on') : t('off'), onChange: (next) => patch('trace', next) }),
+            }),
+          ],
+        }),
         h('div', { className: 'dte-footer' },
           h('button', { className: 'dte-btn dte-btn-primary', disabled: busy || !dirty, onClick: () => void save() }, busy ? t('saving') : t('save')),
           h('button', { className: 'dte-btn', disabled: busy, onClick: () => void reset() }, t('reset')),
@@ -639,6 +741,391 @@ window.__ModuleLoader__.load({
         : value.subagentLevel === 'auto' ? t('auto') : levelLabel(value.subagentLevel);
       const aux = value.auxDowngrade === false ? t('off') : (levelLabel(value.auxLevel) ?? value.auxLevel ?? '—');
       return t('summary', { auto, sub, aux });
+    }
+
+    // ── floating debug log ───────────────────────────────────────────────────
+    // The Host keeps the journal (one record per model request, including
+    // subagent sessions); this half only polls it while the switch is on and
+    // renders it in a movable window over the conversation. Nothing here reads
+    // the session log, so the window shows decisions the log cannot carry.
+
+    function storageGet(key) {
+      try {
+        return window.localStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    }
+
+    function storageSet(key, value) {
+      try {
+        window.localStorage.setItem(key, value);
+      } catch {
+        /* a page without storage keeps its default window placement */
+      }
+    }
+
+    function readDebugPos() {
+      const text = storageGet(DEBUG_POS_KEY);
+      if (typeof text !== 'string' || text === '') return null;
+      try {
+        const value = JSON.parse(text);
+        if (typeof value?.left === 'number' && typeof value?.top === 'number') return { left: value.left, top: value.top };
+      } catch {
+        /* an unusable saved position falls back to the corner */
+      }
+      return null;
+    }
+
+    /**
+     * Host origin for the debug route: the desktop shell's transport when the
+     * page is not served from the Host, otherwise this page's origin.
+     * @returns {string|null} origin, or null for a relative URL.
+     */
+    function debugOrigin() {
+      try {
+        const transport = globalThis.__DSH_TRANSPORT__;
+        if (transport !== null && typeof transport === 'object' && typeof transport.streamBaseUrl === 'string' && transport.streamBaseUrl !== '') {
+          return new URL(transport.streamBaseUrl).origin;
+        }
+      } catch {
+        /* fall through to the page origin */
+      }
+      try {
+        if (/^https?:$/.test(window.location.protocol)) return window.location.origin;
+      } catch {
+        /* no location in a bare test realm */
+      }
+      return null;
+    }
+
+    /** Fetch through the desktop shell's carrier when one is installed. */
+    function debugFetch(url, init) {
+      const transport = globalThis.__DSH_TRANSPORT__;
+      if (transport !== null && typeof transport === 'object' && typeof transport.fetch === 'function') return transport.fetch(url, init);
+      return fetch(url, init);
+    }
+
+    function debugUrl(path, query) {
+      const origin = debugOrigin();
+      return `${origin === null ? '' : origin}${path}${query ?? ''}`;
+    }
+
+    function clockOf(at) {
+      const date = new Date(typeof at === 'number' ? at : Date.now());
+      const pad = (value) => String(value).padStart(2, '0');
+      return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    }
+
+    function purposeLabel(purpose, t) {
+      if (purpose === 'agent') return t('debugPurposeAgent');
+      if (purpose === 'session-title') return t('debugPurposeTitle');
+      if (purpose === 'compaction') return t('debugPurposeCompaction');
+      if (purpose === 'auto-review') return t('debugPurposeReview');
+      return typeof purpose === 'string' && purpose !== '' ? purpose : t('debugUnknown');
+    }
+
+    function shortModel(model) {
+      const text = String(model ?? '');
+      return text.length > 26 ? `${text.slice(0, 25)}…` : text;
+    }
+
+    function shortSession(entry) {
+      if (typeof entry.title === 'string' && entry.title !== '') return entry.title;
+      const id = typeof entry.sessionId === 'string' ? entry.sessionId : '';
+      return id.length > 12 ? id.slice(0, 12) : id;
+    }
+
+    function clampNumber(value, low, high) {
+      return Math.min(Math.max(value, low), high);
+    }
+
+    /** Subscribe to one config form without the slot framework's helper. */
+    function useFormSnapshot(form) {
+      const [snapshot, setSnapshot] = React.useState(() => form.getSnapshot());
+      React.useEffect(() => {
+        setSnapshot(form.getSnapshot());
+        const dispose = form.subscribe(() => setSnapshot(form.getSnapshot()));
+        return () => {
+          if (typeof dispose === 'function') dispose();
+        };
+      }, [form]);
+      return snapshot;
+    }
+
+    /** One line describing the live rules, shown in the window footer. */
+    function debugSummary(value, t) {
+      const auto = autoDepth(value) ?? '—';
+      const sub = value?.subagentLevel === 'inherit' || value?.subagentLevel === undefined
+        ? t('inherit')
+        : value.subagentLevel === 'auto' ? t('auto') : (LEVEL_LABELS[value.subagentLevel] ?? value.subagentLevel);
+      const aux = value?.auxDowngrade === false ? t('off') : (LEVEL_LABELS[value?.auxLevel] ?? value?.auxLevel ?? '—');
+      return `Auto ${auto} · ${sub} · ${aux}`;
+    }
+
+    /** The settings snapshot a `volatile` save recorded in the journal. */
+    function configText(entry, t) {
+      const auto = entry.autoLevel === 'model-default' || entry.autoLevel === undefined ? entry.defaultEffort : entry.autoLevel;
+      const sub = entry.subagentLevel === 'inherit' || entry.subagentLevel === undefined ? t('inherit') : entry.subagentLevel;
+      const aux = entry.auxDowngrade === false ? t('off') : entry.auxLevel;
+      const debug = entry.debugOverlay === true ? t('on') : t('off');
+      return `${auto ?? '—'} · ${sub ?? '—'} · ${aux ?? '—'} · ${debug}`;
+    }
+
+    function debugRow(entry, t) {
+      const switched = entry?.switched === true;
+      const className = `dte-dbg-row${switched ? ' dte-dbg-row-switched' : ''}`;
+      if (entry?.kind === 'config') {
+        return h('div', { key: entry.seq, className },
+          h('div', { className: 'dte-dbg-line' },
+            h('span', { className: 'dte-dbg-time' }, clockOf(entry.at)),
+            h('span', { className: 'dte-dbg-purpose' }, t('debugKindConfig')),
+            h('span', { className: 'dte-dbg-levels' }, configText(entry, t))),
+          h('div', { className: 'dte-dbg-meta' },
+            h('span', null, `enabled ${entry.enabled === false ? 'off' : 'on'}`)));
+      }
+      if (entry?.kind === 'capability') {
+        const declared = Array.isArray(entry.declared) ? entry.declared : [];
+        const efforts = Array.isArray(entry.efforts) ? entry.efforts.join('/') : '—';
+        return h('div', { key: entry.seq, className },
+          h('div', { className: 'dte-dbg-line' },
+            h('span', { className: 'dte-dbg-time' }, clockOf(entry.at)),
+            h('span', { className: 'dte-dbg-purpose' }, t('debugKindCapability')),
+            h('span', { className: 'dte-dbg-levels' }, `${declared.length} × ${efforts} → ${entry.defaultEffort ?? '—'}`)),
+          h('div', { className: 'dte-dbg-meta' },
+            h('span', { title: declared.join(', ') }, declared.join(', '))));
+      }
+      const requested = typeof entry?.requested === 'string' ? entry.requested : t('debugModelDefault');
+      const applied = typeof entry?.applied === 'string' ? entry.applied : t('debugModelDefault');
+      return h('div', {
+        key: entry?.seq,
+        className,
+        title: `${entry?.provider ?? ''}/${entry?.model ?? ''}`,
+      },
+        h('div', { className: 'dte-dbg-line' },
+          h('span', { className: 'dte-dbg-time' }, clockOf(entry?.at)),
+          entry?.subagent === true ? h('span', { className: 'dte-dbg-badge' }, t('debugSubagent')) : null,
+          h('span', { className: 'dte-dbg-purpose' }, purposeLabel(entry?.purpose, t)),
+          h('span', { className: 'dte-dbg-levels' }, requested, ' → ', h('b', null, applied)),
+          entry?.changed === true
+            ? h('span', { className: 'dte-dbg-purpose', title: `${entry.from ?? '—'} → ${applied}` }, '⇄')
+            : null),
+        h('div', { className: 'dte-dbg-meta' },
+          h('span', null, shortModel(entry?.model)),
+          h('span', { title: entry?.sessionId ?? '' }, shortSession(entry ?? {}))));
+    }
+
+    /**
+     * The conversation's floating debug window.
+     *
+     * Rendered only while `debugOverlay` is on. It polls the Host journal as a
+     * delta, keeps a bounded local copy, and groups nothing: the reader wants
+     * the raw per-request decision, including subagent sessions, which share
+     * the same Host process and therefore the same journal.
+     */
+    function DebugOverlay({ form, useSessions, t }) {
+      const snapshot = useFormSnapshot(form);
+      const enabled = snapshot?.status === 'ready' && snapshot.value?.debugOverlay === true;
+      // The main-view Session is the one this conversation is showing; the
+      // filter also admits its subagent descendants through the durable links.
+      const current = typeof useSessions === 'function'
+        ? useSessions((state) => {
+            const rows = Object.values(state?.byId ?? {});
+            for (const row of rows) {
+              if (row !== null && typeof row === 'object' && (row.retainedBy?.mainView ?? 0) > 0) return row.id;
+            }
+            return null;
+          })
+        : null;
+      const [open, setOpen] = React.useState(() => storageGet(DEBUG_OPEN_KEY) === '1');
+      const [entries, setEntries] = React.useState([]);
+      const [meta, setMeta] = React.useState({ enabled: false, latest: 0, error: null });
+      const [filter, setFilter] = React.useState('current');
+      const [flash, setFlash] = React.useState(null);
+      const [pos, setPos] = React.useState(() => readDebugPos());
+      const nextSeq = React.useRef(0);
+      const flashTimer = React.useRef(null);
+
+      React.useEffect(() => () => {
+        if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+      }, []);
+
+      React.useEffect(() => {
+        if (!enabled) return undefined;
+        let stopped = false;
+        let timer = null;
+        const schedule = (delay) => {
+          if (!stopped) timer = window.setTimeout(poll, delay);
+        };
+        const poll = () => {
+          debugFetch(debugUrl(DEBUG_PATH, `?since=${String(nextSeq.current)}`), {
+            cache: 'no-store',
+            headers: { accept: 'application/json' },
+          })
+            .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${String(response.status)}`))))
+            .then((payload) => {
+              if (stopped || payload === null || typeof payload !== 'object') return;
+              if (payload.enabled === false) {
+                setEntries([]);
+                setMeta({ enabled: false, latest: 0, error: null });
+                nextSeq.current = 0;
+                return;
+              }
+              const reset = payload.reset === true;
+              if (reset) setEntries([]);
+              const fresh = Array.isArray(payload.entries) ? payload.entries : [];
+              if (typeof payload.latest === 'number') nextSeq.current = payload.latest;
+              if (fresh.length > 0) {
+                setEntries((previous) => [...(reset ? [] : previous), ...fresh].slice(-300));
+              }
+              setMeta({ enabled: true, latest: typeof payload.latest === 'number' ? payload.latest : 0, error: null });
+            })
+            .catch((error) => {
+              if (!stopped) setMeta((previous) => ({ ...previous, error: String(error?.message ?? error) }));
+            })
+            .finally(() => {
+              schedule(open ? 700 : 2500);
+            });
+        };
+        poll();
+        return () => {
+          stopped = true;
+          if (timer !== null) window.clearTimeout(timer);
+        };
+      }, [enabled, open]);
+
+      const flashText = (text) => {
+        setFlash(text);
+        if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+        flashTimer.current = window.setTimeout(() => {
+          flashTimer.current = null;
+          setFlash(null);
+        }, 1800);
+      };
+
+      if (!enabled) return null;
+
+      const visible = entries.filter((entry) => {
+        if (entry?.kind !== 'request') return filter !== 'switched';
+        if (filter === 'switched') return entry.switched === true;
+        if (filter === 'current' && current !== null) {
+          return entry.sessionId === current || entry.parentSession === current || entry.rootSessionId === current;
+        }
+        return true;
+      });
+
+      const copy = () => {
+        const text = visible.map((entry) => {
+          if (entry?.kind === 'request') {
+            return `${clockOf(entry.at)} ${entry.subagent === true ? '[sub]' : '[main]'} ${entry.provider}/${entry.model} ${entry.purpose ?? '-'} ${entry.requested ?? 'default'} -> ${entry.applied ?? 'default'}`;
+          }
+          if (entry?.kind === 'capability') return `${clockOf(entry.at)} [capability] ${(entry.declared ?? []).join(', ')}`;
+          return `${clockOf(entry.at)} [config] ${configText(entry ?? {}, t)}`;
+        }).join('\n');
+        try {
+          const write = navigator.clipboard?.writeText?.(text);
+          if (write !== undefined) write.then(() => flashText(t('debugCopied'))).catch(() => undefined);
+          else flashText(t('debugCopied'));
+        } catch {
+          /* a page without clipboard access simply cannot copy */
+        }
+      };
+
+      const clear = () => {
+        nextSeq.current = 0;
+        setEntries([]);
+        debugFetch(debugUrl(DEBUG_CLEAR_PATH), { method: 'POST', headers: { 'x-think-effort-debug': '1' } }).catch(() => undefined);
+      };
+
+      const collapse = () => {
+        setOpen(false);
+        storageSet(DEBUG_OPEN_KEY, '0');
+      };
+
+      const beginDrag = (event) => {
+        if (event.button !== 0) return;
+        const target = event.target;
+        if (target !== null && typeof target?.closest === 'function' && target.closest('button') !== null) return;
+        const card = event.currentTarget?.parentElement;
+        if (card === null || card === undefined || typeof card.getBoundingClientRect !== 'function') return;
+        const rect = card.getBoundingClientRect();
+        const offset = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        const move = (moveEvent) => {
+          const maxLeft = Math.max(0, (window.innerWidth || 0) - rect.width - 8);
+          const maxTop = Math.max(0, (window.innerHeight || 0) - 48);
+          setPos({
+            left: clampNumber(moveEvent.clientX - offset.x, 8, maxLeft),
+            top: clampNumber(moveEvent.clientY - offset.y, 8, maxTop),
+          });
+        };
+        const end = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', end);
+          window.removeEventListener('pointercancel', end);
+          setPos((currentPos) => {
+            if (currentPos !== null) storageSet(DEBUG_POS_KEY, JSON.stringify(currentPos));
+            return currentPos;
+          });
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', end);
+        window.addEventListener('pointercancel', end);
+        event.preventDefault();
+      };
+
+      const filterChip = (id, label) => h('button', {
+        type: 'button',
+        key: id,
+        className: 'dte-dbg-chip' + (filter === id ? ' dte-dbg-chip-on' : ''),
+        onClick: () => setFilter(id),
+      }, label);
+
+      if (!open) {
+        return h(React.Fragment, null, h('style', null, styleText()),
+          h('button', {
+            type: 'button',
+            className: 'dte-dbg-pill',
+            title: t('debugPill'),
+            onClick: () => {
+              setOpen(true);
+              storageSet(DEBUG_OPEN_KEY, '1');
+            },
+          },
+          h('span', { className: 'dte-dbg-dot' + (meta.enabled ? ' dte-dbg-dot-live' : '') }),
+          t('debugPill'),
+            entries.length > 0 ? h('span', { className: 'dte-dbg-pill-count' }, String(entries.length)) : null));
+      }
+
+      const style = pos === null
+        ? undefined
+        : { left: `${String(pos.left)}px`, top: `${String(pos.top)}px`, right: 'auto', bottom: 'auto' };
+      return h(React.Fragment, null, h('style', null, styleText()),
+        h('div', { className: 'dte-dbg-card', style },
+        h('div', { className: 'dte-dbg-head', onPointerDown: beginDrag },
+          h('span', { className: 'dte-dbg-dot' + (meta.enabled ? ' dte-dbg-dot-live' : '') }),
+          h('span', { className: 'dte-dbg-title' }, t('debugTitle')),
+          h('span', { className: 'dte-dbg-count' }, t('debugCount', { n: String(visible.length) })),
+          h('div', { className: 'dte-dbg-head-actions' },
+            h('button', { type: 'button', className: 'dte-dbg-btn', onClick: copy }, flash ?? t('debugCopy')),
+            h('button', { type: 'button', className: 'dte-dbg-btn', onClick: clear }, t('debugClear')),
+            h('button', { type: 'button', className: 'dte-dbg-btn', title: t('debugCollapse'), onClick: collapse }, '—'))),
+        h('div', { className: 'dte-dbg-filters' },
+          filterChip('current', t('debugFilterCurrent')),
+          filterChip('all', t('debugFilterAll')),
+          filterChip('switched', t('debugFilterSwitched'))),
+        meta.error !== null
+          ? h('div', { className: 'dte-dbg-note' }, `${t('debugLoadFailed')}${meta.error}`)
+          : null,
+        meta.error === null && meta.enabled !== true
+          ? h('div', { className: 'dte-dbg-note' }, t('debugDisabledOnHost'))
+          : null,
+        h('div', { className: 'dte-dbg-body' },
+          visible.length === 0
+            ? h('div', { className: 'dte-dbg-empty' }, t('debugEmpty'))
+            : [...visible].reverse().map((entry) => debugRow(entry, t))),
+        h('div', { className: 'dte-dbg-foot' },
+          h('span', null, debugSummary(snapshot.value ?? {}, t)),
+          h('span', { style: { marginLeft: 'auto' } }, meta.enabled ? t('debugLive') : t('debugPaused')))));
     }
 
     /**
@@ -724,9 +1211,18 @@ window.__ModuleLoader__.load({
           id: SECTION_ID,
           locale: NS,
         }, SectionIcon));
+        // The floating debug log lives in the frame-wide overlay layer, above
+        // every column, and renders only while the debug switch is on. It shares
+        // the one form controller, so the switch it obeys is the same save.
+        const offOverlay = slots.inject('shell.overlay', () => slots.register({
+          name: 'shell.overlay',
+          id: 'think-effort-debug',
+          order: 40,
+        }, (props) => DebugOverlay({ form, useSessions: props.useSessions, t })));
         return () => {
           offSection();
           offIcon();
+          offOverlay();
         };
       }), 'think-effort: settings entry');
     }

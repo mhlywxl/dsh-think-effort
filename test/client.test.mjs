@@ -144,17 +144,28 @@ test('the Settings icon is paired with the section id', async () => {
   assert.equal(icon.options.id, section.options.id, 'an unmatched icon id never renders');
 });
 
+test('the floating debug log registers into the frame-wide overlay', async () => {
+  const definition = await loadClient();
+  const fake = fakeCordis();
+  definition.apply(fake.ctx);
+  assert.ok(fake.calls.inject.includes('shell.overlay'), 'the overlay seat must be declared as injected');
+  const overlay = fake.calls.register.find((entry) => entry.options.name === 'shell.overlay');
+  assert.ok(overlay, 'shell.overlay must be registered');
+  assert.equal(overlay.options.id, 'think-effort-debug');
+  assert.equal(typeof overlay.component, 'function');
+});
+
 test('both surfaces unregister when the Host stops serving the namespace', async () => {
   const definition = await loadClient();
   const fake = fakeCordis();
   definition.apply(fake.ctx);
   fake.disposeAll();
-  const settings = fake.registrations.filter((entry) => entry.options.name.startsWith('settings.'));
-  assert.equal(settings.length, 2);
-  for (const entry of settings) assert.equal(entry.disposed, true, `${entry.options.name} must unregister`);
+  const owned = fake.registrations.filter((entry) => entry.options.name.startsWith('settings.') || entry.options.name === 'shell.overlay');
+  assert.equal(owned.length, 3);
+  for (const entry of owned) assert.equal(entry.disposed, true, `${entry.options.name} must unregister`);
 });
 
-test('both locales carry the navigation label', async () => {
+test('both locales carry the navigation and debug labels', async () => {
   const definition = await loadClient();
   const fake = fakeCordis();
   definition.apply(fake.ctx);
@@ -162,4 +173,8 @@ test('both locales carry the navigation label', async () => {
   const en = fake.calls.locale.find((entry) => entry.language === 'en');
   assert.ok(zh?.dictionary.nav, 'zh dictionary needs the nav label');
   assert.ok(en?.dictionary.nav, 'en dictionary needs the nav label');
+  for (const key of ['debugSection', 'debugOverlayRow', 'debugTitle', 'debugEmpty', 'debugFilterCurrent']) {
+    assert.ok(zh?.dictionary[key], `zh dictionary needs ${key}`);
+    assert.ok(en?.dictionary[key], `en dictionary needs ${key}`);
+  }
 });

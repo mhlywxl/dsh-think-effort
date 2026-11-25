@@ -49,6 +49,7 @@ import {
   shouldDeclare,
   withAutoEffort,
 } from './src/policy.js';
+import { createDebugJournal, registerDebugRoutes } from './src/debug.js';
 
 /** The llm-pi-ai settings entry id in a composed profile. */
 const PI_AI_NAMESPACE = 'llm-pi-ai';
@@ -88,6 +89,12 @@ export const Config = z.object({
   auxLevel: z.string().default(DEFAULT_CONFIG.auxLevel).volatile(),
   /** Subagent-owned calls: `inherit`, `auto`, or a fixed level. */
   subagentLevel: z.string().default(DEFAULT_CONFIG.subagentLevel).volatile(),
+  /**
+   * Record every effort decision in a bounded in-memory journal and serve it to
+   * the conversation's floating debug log. Off by default; when off the journal
+   * stays empty and the routes answer `enabled: false`.
+   */
+  debugOverlay: z.boolean().default(DEFAULT_CONFIG.debugOverlay).volatile(),
   /** Diagnostic stderr trace of each decision. */
   trace: z.boolean().default(false).volatile(),
 });
@@ -247,6 +254,132 @@ export function apply(ctx, rawConfig) {
   /** Log de-duplication for per-request decisions. */
   const logged = new Set();
 
+  // ── debug journal ────────────────────────────────────────────────────────
+  // The browser half renders this as a floating log over the conversation.
+  // Recording is gated by the live config reference, so the switch costs
+  // nothing while it is off and applies on the next request after a save.
+  const debugJournal = createDebugJournal();
+  const debugOn = () => config.debugOverlay === true;
+  /** Session facts for the journal, cached because headers do not change. */
+  const debugSessions = new Map();
+  /** Last level served per `session|purpose`, so a record can name the switch. */
+  const debugLast = new Map();
+
+  /** Read one live Session header, when the store still holds it. */
+  const headerOf = (sessionId) => {
+    try {
+      return ctx.get('sessions')?.get?.(sessionId)?.header;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
+   * Describe one request's session for the journal: whether it belongs to a
+   * subagent, the durable parent link, and the title when one is known.
+   * @param {string} [sessionId] stamped session identity.
+   * @returns {object} JSON-safe identity fields.
+   */
+  const debugSessionFacts = (sessionId) => {
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      return { sessionId: null, parentSession: null, rootSessionId: null, subagent: false, title: null };
+    }
+    const cached = debugSessions.get(sessionId);
+    if (cached !== undefined) return cached;
+    let agent;
+    try {
+      agent = ctx.get('agents')?.get?.(sessionId);
+    } catch {
+      agent = undefined;
+    }
+    const session = agent?.session ?? (() => {
+      try {
+        return ctx.get('sessions')?.get?.(sessionId);
+      } catch {
+        return undefined;
+      }
+    })();
+    const header = session?.header;
+    const parentSession = typeof header?.parentSession === 'string' ? header.parentSession : null;
+    let rootSessionId = sessionId;
+    let cursor = header;
+    for (let depth = 0; depth < 8 && cursor !== undefined; depth += 1) {
+      if (typeof cursor.parentSession !== 'string') {
+        rootSessionId = typeof cursor.id === 'string' ? cursor.id : rootSessionId;
+        break;
+      }
+      rootSessionId = cursor.parentSession;
+      cursor = headerOf(cursor.parentSession);
+      if (cursor === undefined) break;
+    }
+    let title = null;
+    try {
+      const snapshot = ctx.get('sessionTitle')?.get?.(session);
+      if (typeof snapshot?.title === 'string' && snapshot.title !== '') title = snapshot.title;
+    } catch {
+      /* a missing title service only costs the label */
+    }
+    const facts = {
+      sessionId,
+      parentSession,
+      rootSessionId,
+      subagent: isSubagentAgent(agent) || header?.origin === 'subagent' || (typeof header?.delegationDepth === 'number' && header.delegationDepth > 0),
+      title,
+    };
+    if (debugSessions.size > 200) debugSessions.clear();
+    debugSessions.set(sessionId, facts);
+    return facts;
+  };
+
+  /**
+   * Append one journal record while the debug switch is on.
+   * @param {string} kind record type.
+   * @param {object} [fields] JSON-safe fields.
+   */
+  const debugRecord = (kind, fields) => {
+    if (debugOn() !== true) return;
+    try {
+      debugJournal.record(kind, fields);
+    } catch {
+      /* a debug record must never break a model request */
+    }
+  };
+
+  /**
+   * Record one per-request effort decision: what the selection asked for, what
+   * the adapter will send, and whether that differs from the previous call of
+   * the same session and purpose (the "switch" a reader is looking for).
+   * @param {object} input decision facts.
+   * @param {string} input.provider route key.
+   * @param {string} input.model model id.
+   * @param {object} input.options the request options the adapter receives.
+   * @param {string} [input.level] the level the plugin applied, if any.
+   */
+  const debugRequest = ({ provider, model, options, level }) => {
+    if (debugOn() !== true) return;
+    // An ordinary agent step usually carries no purpose; name it explicitly so
+    // the browser half can label it instead of showing "unknown".
+    const purpose = typeof options.purpose === 'string' && options.purpose !== '' ? options.purpose : 'agent';
+    const requested = typeof options.reasoningEffort === 'string' ? options.reasoningEffort : null;
+    const applied = level ?? requested;
+    const facts = debugSessionFacts(options.sessionId);
+    const key = `${facts.sessionId ?? '-'}|${purpose ?? '-'}`;
+    const previous = debugLast.get(key) ?? null;
+    if (debugLast.size > 200) debugLast.clear();
+    debugLast.set(key, applied);
+    debugRecord('request', {
+      ...facts,
+      provider,
+      model,
+      purpose,
+      requested,
+      applied,
+      switched: level !== undefined && level !== requested,
+      from: previous,
+      changed: previous !== null && previous !== applied,
+    });
+  };
+
   // ── capability declaration ───────────────────────────────────────────────
   /** Serialize settings writes; a boot burst must not stack whole-section updates. */
   let syncTail = Promise.resolve();
@@ -269,6 +402,11 @@ export function apply(ctx, rawConfig) {
       try {
         await settings.update(PI_AI_NAMESPACE, { providers: plan.section.providers }, section.revision);
         trace('capability sync: section written');
+        debugRecord('capability', {
+          declared: plan.declared.map((entry) => `${entry.provider}/${entry.model}`),
+          efforts: [...config.efforts],
+          defaultEffort: config.defaultEffort,
+        });
         void selfCheck();
         ctx.logger?.info?.(
           '[think-effort] declared DeepSeek effort capabilities in %s: %s',
@@ -306,6 +444,7 @@ export function apply(ctx, rawConfig) {
         efforts: reasoning !== null && typeof reasoning === 'object' ? reasoning.efforts : undefined,
         defaultEffort: reasoning !== null && typeof reasoning === 'object' ? reasoning.defaultEffort : undefined,
       }, config);
+      debugRequest({ provider, model, options, level });
       if (level === undefined || level === options.reasoningEffort) return options;
       const key = `${provider}/${model}/${String(options.purpose ?? '-')}/${level}`;
       trace('translate: %s/%s purpose=%s requested=%s -> %s', provider, model, String(options.purpose ?? '-'), String(options.reasoningEffort), level);
@@ -393,6 +532,15 @@ export function apply(ctx, rawConfig) {
   ctx.on('loader/volatile-update', () => {
     config = readConfig(rawConfig);
     trace('volatile update: enabled=%s subagentLevel=%s', config.enabled, config.subagentLevel);
+    debugRecord('config', {
+      enabled: config.enabled,
+      debugOverlay: config.debugOverlay,
+      autoLevel: config.autoLevel,
+      defaultEffort: config.defaultEffort,
+      subagentLevel: config.subagentLevel,
+      auxDowngrade: config.auxDowngrade,
+      auxLevel: config.auxLevel,
+    });
     if (config.enabled === false) return;
     syncCapabilities();
   });
@@ -487,6 +635,16 @@ export function apply(ctx, rawConfig) {
   };
   ctx.inject?.(['tools'], (scope) => {
     scope.effect(() => scope.tools.register(statusTool), 'think-effort: status tool');
+  });
+
+  // ── debug routes ─────────────────────────────────────────────────────────
+  // The conversation's floating debug log polls these. One effect owns both
+  // route registrations, so unloading the bundle removes the endpoints.
+  ctx.inject?.(['webServer'], (scope) => {
+    scope.effect(() => registerDebugRoutes(scope, {
+      journal: debugJournal,
+      enabled: () => config.debugOverlay === true,
+    }), 'think-effort: debug routes');
   });
 
   // Unload: put every registry entry we replaced back, then retire a durable
