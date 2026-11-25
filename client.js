@@ -778,37 +778,47 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Host origin for the debug route: the desktop shell's transport when the
-     * page is not served from the Host, otherwise this page's origin.
-     * @returns {string|null} origin, or null for a relative URL.
+     * Base prefix for the debug route.
+     *
+     * Both real page carriers reach the route with a document-relative URL:
+     * the browser GUI is served by the Host itself, and DSH Desktop loads the
+     * page from `dsh-app://app/` whose protocol handler forwards every unknown
+     * path to the Host with its authentication cookie. Turning that URL into
+     * the advertised `http://127.0.0.1:<port>` origin instead makes the request
+     * cross-origin, and because a plugin route cannot answer CORS the browser
+     * reports "Failed to fetch". Only a page without such a carrier (a
+     * `file://` shell or a worker preview) needs the advertised origin.
+     * @returns {string} '' for a relative URL, or an origin prefix.
      */
-    function debugOrigin() {
+    function debugBase() {
+      let protocol = '';
+      try {
+        protocol = window.location.protocol;
+      } catch {
+        /* no location in a bare test realm */
+      }
+      if (protocol === 'http:' || protocol === 'https:' || protocol === 'dsh-app:') return '';
       try {
         const transport = globalThis.__DSH_TRANSPORT__;
         if (transport !== null && typeof transport === 'object' && typeof transport.streamBaseUrl === 'string' && transport.streamBaseUrl !== '') {
           return new URL(transport.streamBaseUrl).origin;
         }
       } catch {
-        /* fall through to the page origin */
+        /* an unusable carrier falls back to a relative URL */
       }
-      try {
-        if (/^https?:$/.test(window.location.protocol)) return window.location.origin;
-      } catch {
-        /* no location in a bare test realm */
-      }
-      return null;
+      return '';
     }
 
-    /** Fetch through the desktop shell's carrier when one is installed. */
-    function debugFetch(url, init) {
+    /**
+     * Fetch one debug-route path. A shell that owns the page transport (such as
+     * a worker preview with a tunnel) carries the request itself; every other
+     * page uses the browser's fetch against the relative URL.
+     */
+    function debugFetch(path, query, init) {
+      const url = `${debugBase()}${path}${query ?? ''}`;
       const transport = globalThis.__DSH_TRANSPORT__;
       if (transport !== null && typeof transport === 'object' && typeof transport.fetch === 'function') return transport.fetch(url, init);
       return fetch(url, init);
-    }
-
-    function debugUrl(path, query) {
-      const origin = debugOrigin();
-      return `${origin === null ? '' : origin}${path}${query ?? ''}`;
     }
 
     function clockOf(at) {
@@ -958,7 +968,7 @@ window.__ModuleLoader__.load({
           if (!stopped) timer = window.setTimeout(poll, delay);
         };
         const poll = () => {
-          debugFetch(debugUrl(DEBUG_PATH, `?since=${String(nextSeq.current)}`), {
+          debugFetch(DEBUG_PATH, `?since=${String(nextSeq.current)}`, {
             cache: 'no-store',
             headers: { accept: 'application/json' },
           })
@@ -1034,7 +1044,7 @@ window.__ModuleLoader__.load({
       const clear = () => {
         nextSeq.current = 0;
         setEntries([]);
-        debugFetch(debugUrl(DEBUG_CLEAR_PATH), { method: 'POST', headers: { 'x-think-effort-debug': '1' } }).catch(() => undefined);
+        debugFetch(DEBUG_CLEAR_PATH, '', { method: 'POST', headers: { 'x-think-effort-debug': '1' } }).catch(() => undefined);
       };
 
       const collapse = () => {
