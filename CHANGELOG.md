@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 — 2026-11-26
+
+- **自动难度（实验，默认关闭）**：新增 `adaptiveEnabled` 总开关。打开后只对模型选择器里的 `Auto` 生效：
+  - **探索阶段降档**（镜像 Reasonix v1.38.1 的 reasoning governor）：先按默认档跑一轮；触发条件成立且本轮还没出现写文件/本地执行时，后续请求降到 `adaptiveExplorationLevel`（默认 `low`）；第一次写/执行即退出探索、恢复默认档。状态按会话隔离、每轮重置。
+  - **触发方式**：`adaptiveTrigger` 默认 `auto`——供应商上报 reasoning tokens 时用阈值（`adaptiveReasoningThreshold`，默认 1500），否则退回轮次（`adaptiveMinRounds`，默认 1）。实测当前网关的 `assistant/message.usage` 不返回 reasoning tokens，若只按阈值会完全失效，因此加入轮次回退；也可强制 `rounds` / `reasoning`。
+  - **计划模式映射**：`planMode` 激活时 Auto 落到 `adaptivePlanLevel`（默认 `high`），可关。
+  - **优先级写死**：廉价调用 → 固定 `subagentLevel` → 自动策略 → Auto 默认；用户显式选的档位永远原样透传，自动策略不介入；所有自动档位 clamp 到模型已声明词表。
+  - **可观测**：调试悬浮窗新增「探索 / 计划」原因徽标，journal 记录 `reason`/`phase`；设置页新增「自动难度（实验）」区块（6 个字段，全部 volatile）。
+  - **未做**（按 P1 范围）：失败升档、按深度/preset 的多层映射；不按提示词/工具名猜难度。
+- 文档：README / DETAIL（中英）新增自动难度说明与「为什么默认关闭」；`cordis.patch.yml` 与配置表补 6 个字段。
+- 测试：`node --test` **54 项全绿**（新增 8 项自适应状态机、3 项策略/配置归一化、3 项 Host 集成（含 agent 作用域 planMode）、客户端双语文案守卫）。
+
 ## 0.5.1 — 2026-11-25
 
 - **修复 Desktop 上悬浮窗一直「读取调试日志失败：Failed to fetch」**：DSH Desktop 的页面从 `dsh-app://app/` 加载，`__DSH_TRANSPORT__.streamBaseUrl` 指向 `http://127.0.0.1:<port>`。上一版把调试路由拼成这个绝对地址，浏览器把它当成跨源请求，而插件路由没有 CORS 响应头，于是被浏览器拒绝（`TypeError: Failed to fetch`），只有浏览器里打开的 Web GUI 能用。

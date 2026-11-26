@@ -9,6 +9,7 @@
 3. **逐请求解析**：在适配器边界把 `auto` 换成声明默认档；`purpose` 属于廉价调用时换成 `low`（仅当模型声明了它，且**与会话选了什么都无关**——会话标题/图片摘要本来就不继承会话档位）；手动选的档位一律原样透传，由 DSH 自己校验。
 4. **子代理档位**：可给子代理统一指定强度（`inherit` / `auto` / `low`…`max`）。`inherit` 保持 DSH 原生继承；固定档会覆盖子代理自身或从父代理继承的选择，廉价调用的降档仍然优先。
 5. **实时调试日志**：可选的悬浮窗，展示每次请求的档位决策（请求档位 → 实际档位），包括子代理会话；只记录，不改变任何请求。
+6. **自动难度（实验，默认关闭）**：只对 `Auto` 生效的探索阶段降档与计划模式映射；显式档位、廉价调用与固定子代理档位始终优先。
 
 ## 使用
 
@@ -29,6 +30,18 @@
 - 「当前会话 / 全部会话 / 仅切换」筛选与一键复制。
 
 实现分两半：Host 半边在适配器边界把每条决策写入一个**内存环形缓冲**（最多 300 条，不写会话日志、不落盘），并通过两条 `webServer` 路由提供增量读取与清空；浏览器半边按开关状态轮询，只在打开时请求，窗口位置与展开状态存在浏览器本地。关掉开关后路由返回 `enabled: false`，窗口消失、记录停止。
+
+## 自动难度（实验）
+
+默认关闭的 `adaptiveEnabled` 总开关。打开后只对模型选择器里的 `Auto` 生效：
+
+- **探索阶段降档**（移植自 Reasonix v1.38.1 的实验性 reasoning governor）：一轮开始时按默认档；触发条件成立且本轮还没出现写文件/本地执行（`write`、`edit`、`apply_patch`、`bash`、`terminal_send` 等）时，后续请求降到 `adaptiveExplorationLevel`（默认 `low`）；第一次写/执行即退出探索并恢复默认档。
+  触发条件由 `adaptiveTrigger` 决定：`auto`（默认）在供应商上报 `reasoningTokens` 时用阈值 `adaptiveReasoningThreshold`（默认 1500），否则退回按轮次 `adaptiveMinRounds`（默认 1，即第一轮之后）；`rounds` / `reasoning` 可强制其中一种。多数 OpenAI 兼容网关不返回 reasoning tokens，因此默认需要轮次回退。
+- **计划模式**：`planMode` 激活时 Auto 落到 `adaptivePlanLevel`（默认 `high`），可关闭该映射。
+- **优先级**：廉价调用（标题/压缩/复核）→ 固定 `subagentLevel` → 自动策略 → `Auto` 默认解析。用户显式选择的档位永远原样透传；自动建议一律 clamp 到模型已声明词表，不会发明档位。
+- **状态**：按 `sessionId` 隔离（并行子代理互不影响），`turn/end` 重置，Host 重启后从探索态开始；不写会话日志、不落盘。
+- **可观测**：调试悬浮窗给这类行加「探索 / 计划」标记，journal 记录 `reason`/`phase`。
+- **范围**：本版本不含失败升档、按深度/preset 的多层映射，也不按提示词/工具名猜难度。
 
 ## 设置页从哪里来
 
@@ -60,6 +73,14 @@
 | `auxLevel` | `low` | 廉价调用用的档位 |
 | `autoScope` | `all` | `all` / `declared` / `off` |
 | `subagentLevel` | `inherit` | 子代理档位：`inherit` / `auto` / 固定档；固定档覆盖子代理自身或继承的选择 |
+| `adaptiveEnabled` | `false` | 自动难度总开关（实验；只对 Auto 生效） |
+| `adaptiveExploration` | `true` | 探索阶段降档 |
+| `adaptiveExplorationLevel` | `low` | 探索阶段档位 |
+| `adaptiveTrigger` | `auto` | `auto` / `rounds` / `reasoning` |
+| `adaptiveReasoningThreshold` | `1500` | reasoning 规则的触发阈值 |
+| `adaptiveMinRounds` | `1` | rounds 规则的触发轮次 |
+| `adaptivePlanMode` | `true` | 计划模式映射高档 |
+| `adaptivePlanLevel` | `high` | 计划模式档位 |
 | `debugOverlay` | `false` | 会话界面的实时档位切换日志（只记录，不改请求；Host 内存最多 300 条） |
 | `trace` | `false` | 把决策写到 stderr（排查用） |
 

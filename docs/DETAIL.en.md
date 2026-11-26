@@ -9,6 +9,7 @@ Declarative thinking-depth control for DeepSeek (and other) reasoning models: th
 3. **Resolves per request.** At the adapter boundary `auto` becomes the declared default; a request whose `purpose` is a cheap host-owned call becomes `low` when the model declares it — regardless of the session's own choice, because those bounded calls never inherit it; a manually picked depth passes through untouched and is validated by DSH itself.
 4. **Subagent depth.** A subagent effort can be pinned (`inherit` / `auto` / `low`…`max`). `inherit` keeps DSH's native inheritance; a fixed depth overrides the child's own or inherited pick, while a cheap-call downgrade still wins.
 5. **Live debug log.** An optional floating window shows every request's effort decision (requested → sent), subagent sessions included. It records only; it never changes a request.
+6. **Automatic difficulty (experimental, off by default).** An exploration-phase downgrade and a plan-mode elevation that apply only to `Auto`; explicit depths, cheap calls, and fixed subagent depths always win.
 
 ## Usage
 
@@ -29,6 +30,18 @@ Turn on **Debug → Show the live effort-switch log in the conversation** and a 
 - filters for this session, all sessions, and switches only, plus one-click copy.
 
 Two halves: the Host half appends each decision, at the adapter boundary, to an **in-memory ring buffer** (300 records at most, never written to the session log or disk) and serves it through two `webServer` routes — a cursor-based read and a clear; the browser half polls only while the switch is on, and keeps the window's position and open state in browser storage. With the switch off the routes answer `enabled: false`, the window disappears, and recording stops.
+
+## Automatic difficulty (experimental)
+
+The opt-in `adaptiveEnabled` switch. When on it applies only to the selector's `Auto`:
+
+- **Exploration downgrade** (ported from Reasonix v1.38.1's experimental reasoning governor): a turn starts at the default depth. Once the trigger holds and the turn has not written or executed anything yet (`write`, `edit`, `apply_patch`, `bash`, `terminal_send`, …), later requests drop to `adaptiveExplorationLevel` (default `low`). The first write or local execution ends the phase and restores the default.
+  The trigger is `adaptiveTrigger`: `auto` (default) uses `adaptiveReasoningThreshold` (1500) when the provider reports `reasoningTokens`, and otherwise falls back to `adaptiveMinRounds` (1 assistant round); `rounds` and `reasoning` force one rule. Most OpenAI-compatible gateways report no reasoning tokens, which is why the round fallback exists.
+- **Plan mode**: while `planMode` is active, Auto maps to `adaptivePlanLevel` (default `high`); the mapping can be turned off.
+- **Precedence**: cheap calls (title/compaction/auto-review) → fixed `subagentLevel` → adaptive policy → Auto's default resolution. An explicit selector depth always passes through untouched; every adaptive suggestion is clamped to the model's declared vocabulary.
+- **State**: per `sessionId` (parallel subagents never share a phase), reset on `turn/end`, exploration again after a Host restart; never written to the session log or disk.
+- **Observability**: the floating log tags these rows `explore` / `plan`, and the journal records `reason`/`phase`.
+- **Scope**: no failure escalation and no depth/preset maps in this release; it never guesses from prompt text or tool names.
 
 ## Where the settings page comes from
 
@@ -60,6 +73,14 @@ Two halves: the Host half appends each decision, at the adapter boundary, to an 
 | `auxLevel` | `low` | Depth those calls request |
 | `autoScope` | `all` | `all` / `declared` / `off` |
 | `subagentLevel` | `inherit` | Subagent depth: `inherit` / `auto` / a fixed depth; a fixed depth overrides the child's own or inherited pick |
+| `adaptiveEnabled` | `false` | Automatic difficulty master switch (experimental; Auto only) |
+| `adaptiveExploration` | `true` | Downgrade during exploration |
+| `adaptiveExplorationLevel` | `low` | Depth used while exploring |
+| `adaptiveTrigger` | `auto` | `auto` / `rounds` / `reasoning` |
+| `adaptiveReasoningThreshold` | `1500` | Threshold for the reasoning rule |
+| `adaptiveMinRounds` | `1` | Round count for the rounds rule |
+| `adaptivePlanMode` | `true` | Map plan mode to a higher depth |
+| `adaptivePlanLevel` | `high` | Depth used in plan mode |
 | `debugOverlay` | `false` | Live effort-switch log over the conversation (records only, never rewrites; 300 records in Host memory) |
 | `trace` | `false` | Write decisions to stderr for diagnosis |
 

@@ -62,6 +62,8 @@ window.__ModuleLoader__.load({
       unsaved: '有未保存的改动。',
       invalidPattern: '模型 ID 正则需要是合法的 JavaScript 正则。',
       invalidEfforts: '至少保留一个档位。',
+      adaptiveThresholdInvalid: '触发阈值必须是非负数字。',
+      adaptiveRoundsInvalid: '触发轮次必须是至少 1 的整数。',
       effortPicker: '自动思考档位',
       sectionPurpose: '档位分配',
       sectionPurposeHint: '每一类请求各自决定用什么强度；显式选择的具体档位不会被“普通步骤”覆盖。',
@@ -91,6 +93,27 @@ window.__ModuleLoader__.load({
       patternHint: '网关别名用，例如 ^deepseek；不区分大小写。',
       declareModelsRow: '额外声明',
       declareModelsHint: '每行一个 provider/model，或一个模型 ID 正则；用于没有匹配到上面两条规则的网关。',
+      sectionAdaptive: '自动难度（实验）',
+      adaptiveSectionHint: '默认关闭。只对模型选择器里的 Auto 生效：显式选的档位永远优先，也不会根据提示词或工具名猜难度。',
+      adaptiveEnabledRow: '启用自动难度',
+      adaptiveEnabledHint: '打开后才按下面的规则升降档；关闭时与原行为完全一致。',
+      adaptiveExplorationRow: '探索阶段降档',
+      adaptiveExplorationHint: '先按默认档跑一轮；若这一轮思考很贵且还没开始写文件或执行命令，后续请求降到探索档；一旦出现写/执行就恢复默认档。',
+      adaptiveExplorationLevelRow: '探索阶段使用的档位',
+      adaptiveThresholdRow: '触发阈值（上一轮 reasoning tokens）',
+      adaptiveThresholdHint: '默认 1500；仅当触发方式使用思考 token 时生效。',
+      adaptiveTriggerRow: '触发方式',
+      adaptiveTriggerHint: '自动：供应商上报 reasoning tokens 时按阈值，否则按轮次（多数网关不报 reasoning tokens）；轮次：只看本轮助手消息数；思考 token：只按 reasoning tokens。',
+      adaptiveTriggerAuto: '自动（优先思考 token）',
+      adaptiveTriggerRounds: '按轮次',
+      adaptiveTriggerReasoning: '按思考 token',
+      adaptiveMinRoundsRow: '触发轮次（本轮助手消息数）',
+      adaptiveMinRoundsHint: '默认 1：第一轮之后、仍在探索时降档。',
+      adaptivePlanRow: '计划模式使用高档',
+      adaptivePlanHint: '计划模式下显式提高档位，避免把“探索”误降；不想要可以关闭。',
+      adaptivePlanLevelRow: '计划模式使用的档位',
+      debugReasonExploration: '探索',
+      debugReasonPlan: '计划',
       debugSection: '调试',
       debugSectionHint: '调试只记录、不改变任何请求：打开后，每次模型请求的档位决策都会实时出现在会话界面的悬浮窗里。',
       debugOverlayRow: '在会话界面显示实时档位切换日志',
@@ -154,6 +177,8 @@ window.__ModuleLoader__.load({
       unsaved: 'Unsaved changes.',
       invalidPattern: 'The model-id pattern must be a valid JavaScript regular expression.',
       invalidEfforts: 'Keep at least one depth.',
+      adaptiveThresholdInvalid: 'The trigger threshold must be a non-negative number.',
+      adaptiveRoundsInvalid: 'The trigger round must be an integer of at least 1.',
       effortPicker: 'Automatic thinking depth',
       sectionPurpose: 'Depth assignment',
       sectionPurposeHint: 'Each purpose chooses its own depth; an explicit pick is never overridden by the ordinary-step rule.',
@@ -183,6 +208,27 @@ window.__ModuleLoader__.load({
       patternHint: 'For gateway aliases, such as ^deepseek; case insensitive.',
       declareModelsRow: 'Extra declarations',
       declareModelsHint: 'One provider/model per line, or a model-id regular expression, for gateways the rules above miss.',
+      sectionAdaptive: 'Automatic difficulty (experimental)',
+      adaptiveSectionHint: 'Off by default. Applies only to the selector\'s Auto: an explicit depth always wins, and the policy never guesses from prompt text or tool names.',
+      adaptiveEnabledRow: 'Enable automatic difficulty',
+      adaptiveEnabledHint: 'When on, the rules below may change the depth; when off, behavior is exactly as before.',
+      adaptiveExplorationRow: 'Lower depth during exploration',
+      adaptiveExplorationHint: 'Run the first round at the default depth; if that round thought expensively and the turn has not started writing or executing yet, later requests drop to the exploration depth. The first write or local execution restores the default.',
+      adaptiveExplorationLevelRow: 'Depth used while exploring',
+      adaptiveThresholdRow: 'Trigger threshold (previous round\'s reasoning tokens)',
+      adaptiveThresholdHint: '1500 by default; only used when the trigger rule reads reasoning tokens.',
+      adaptiveTriggerRow: 'Trigger rule',
+      adaptiveTriggerHint: 'auto: use the reasoning threshold when the provider reports reasoning tokens, otherwise count assistant rounds (most gateways report no reasoning tokens); rounds: count rounds only; reasoning: use reasoning tokens only.',
+      adaptiveTriggerAuto: 'Auto (reasoning first)',
+      adaptiveTriggerRounds: 'By round',
+      adaptiveTriggerReasoning: 'By reasoning tokens',
+      adaptiveMinRoundsRow: 'Trigger round (assistant messages this turn)',
+      adaptiveMinRoundsHint: '1 by default: downgrade after the first round while still exploring.',
+      adaptivePlanRow: 'Use a higher depth in plan mode',
+      adaptivePlanHint: 'Plan mode raises the depth explicitly so exploration is not downgraded there; turn it off if not wanted.',
+      adaptivePlanLevelRow: 'Depth used in plan mode',
+      debugReasonExploration: 'explore',
+      debugReasonPlan: 'plan',
       debugSection: 'Debug',
       debugSectionHint: 'Debugging records but never changes a request: when on, every effort decision appears live in a floating log over the conversation.',
       debugOverlayRow: 'Show the live effort-switch log in the conversation',
@@ -238,7 +284,11 @@ window.__ModuleLoader__.load({
     const FIELDS = [
       'enabled', 'declareCapability', 'deepseekHosts', 'deepseekModelPattern',
       'declareModels', 'efforts', 'defaultEffort', 'autoLevel', 'autoScope',
-      'auxDowngrade', 'auxPurposes', 'auxLevel', 'subagentLevel', 'debugOverlay', 'trace',
+      'auxDowngrade', 'auxPurposes', 'auxLevel', 'subagentLevel',
+      'adaptiveEnabled', 'adaptiveExploration', 'adaptiveExplorationLevel',
+      'adaptiveTrigger', 'adaptiveReasoningThreshold', 'adaptiveMinRounds',
+      'adaptivePlanMode', 'adaptivePlanLevel',
+      'debugOverlay', 'trace',
     ];
 
     function equal(a, b) {
@@ -352,6 +402,9 @@ window.__ModuleLoader__.load({
         .dte-dbg-levels b { color: var(--dsw-alias-brand-primary); font-weight: 600; }
         .dte-dbg-meta { display: flex; gap: 8px; margin-top: 1px; font-size: 10px; color: var(--dsw-alias-label-secondary); white-space: nowrap; overflow: hidden; }
         .dte-dbg-meta span { overflow: hidden; text-overflow: ellipsis; }
+        .dte-dbg-reason { flex: none; border-radius: 4px; padding: 0 4px; font-size: 10px; background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); color: var(--dsw-alias-brand-primary); }
+        .dte-dbg-reason-plan { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 16%, transparent); color: var(--dsw-alias-state-success-primary); }
+        .dte-input-number { max-width: 180px; }
         .dte-dbg-empty { padding: 14px 12px; font-size: 12px; color: var(--dsw-alias-label-secondary); }
         .dte-dbg-note { padding: 8px 12px; font-size: 11px; color: var(--dsw-alias-state-warn-primary); }
         .dte-dbg-foot { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--dsw-alias-border-l1); font-size: 10px; color: var(--dsw-alias-label-secondary); }
@@ -442,6 +495,10 @@ window.__ModuleLoader__.load({
       const validate = () => {
         if (asArray(current.efforts).length === 0) return t('invalidEfforts');
         if (!validPattern(current.deepseekModelPattern)) return t('invalidPattern');
+        const threshold = current.adaptiveReasoningThreshold;
+        if (typeof threshold !== 'number' || !Number.isFinite(threshold) || threshold < 0) return t('adaptiveThresholdInvalid');
+        const rounds = current.adaptiveMinRounds;
+        if (typeof rounds !== 'number' || !Number.isFinite(rounds) || rounds < 1) return t('adaptiveRoundsInvalid');
         for (const entry of asArray(current.declareModels)) {
           if (entry.includes('/')) continue;
           if (!validPattern(entry)) return t('invalidPattern');
@@ -708,6 +765,83 @@ window.__ModuleLoader__.load({
           ],
         }),
         Section({
+          title: t('sectionAdaptive'),
+          hint: t('adaptiveSectionHint'),
+          children: [
+            Row({
+              key: 'adaptiveEnabled',
+              label: t('adaptiveEnabledRow'),
+              hint: t('adaptiveEnabledHint'),
+              children: Switch({ checked: current.adaptiveEnabled === true, disabled: busy, label: current.adaptiveEnabled === true ? t('on') : t('off'), onChange: (next) => patch('adaptiveEnabled', next) }),
+            }),
+            Row({
+              key: 'adaptiveExploration',
+              label: t('adaptiveExplorationRow'),
+              hint: t('adaptiveExplorationHint'),
+              children: Switch({ checked: current.adaptiveExploration !== false, disabled: busy, label: current.adaptiveExploration === false ? t('off') : t('on'), onChange: (next) => patch('adaptiveExploration', next) }),
+            }),
+            Row({
+              key: 'adaptiveExplorationLevel',
+              label: t('adaptiveExplorationLevelRow'),
+              children: levelSelect('adaptiveExplorationLevel'),
+            }),
+            Row({
+              key: 'adaptiveTrigger',
+              label: t('adaptiveTriggerRow'),
+              hint: t('adaptiveTriggerHint'),
+              children: Select({
+                value: current.adaptiveTrigger ?? 'auto',
+                options: [
+                  { value: 'auto', label: t('adaptiveTriggerAuto') },
+                  { value: 'rounds', label: t('adaptiveTriggerRounds') },
+                  { value: 'reasoning', label: t('adaptiveTriggerReasoning') },
+                ],
+                disabled: busy,
+                onChange: (next) => patch('adaptiveTrigger', next),
+              }),
+            }),
+            Row({
+              key: 'adaptiveThreshold',
+              label: t('adaptiveThresholdRow'),
+              hint: t('adaptiveThresholdHint'),
+              children: h('input', {
+                className: 'dte-input dte-input-number',
+                type: 'number',
+                min: 0,
+                step: 100,
+                value: current.adaptiveReasoningThreshold ?? 1500,
+                disabled: busy,
+                onChange: (event) => patch('adaptiveReasoningThreshold', event.target.value === '' ? 0 : Number(event.target.value)),
+              }),
+            }),
+            Row({
+              key: 'adaptiveRounds',
+              label: t('adaptiveMinRoundsRow'),
+              hint: t('adaptiveMinRoundsHint'),
+              children: h('input', {
+                className: 'dte-input dte-input-number',
+                type: 'number',
+                min: 1,
+                step: 1,
+                value: current.adaptiveMinRounds ?? 1,
+                disabled: busy,
+                onChange: (event) => patch('adaptiveMinRounds', event.target.value === '' ? 1 : Number(event.target.value)),
+              }),
+            }),
+            Row({
+              key: 'adaptivePlan',
+              label: t('adaptivePlanRow'),
+              hint: t('adaptivePlanHint'),
+              children: Switch({ checked: current.adaptivePlanMode !== false, disabled: busy, label: current.adaptivePlanMode === false ? t('off') : t('on'), onChange: (next) => patch('adaptivePlanMode', next) }),
+            }),
+            Row({
+              key: 'adaptivePlanLevel',
+              label: t('adaptivePlanLevelRow'),
+              children: levelSelect('adaptivePlanLevel'),
+            }),
+          ],
+        }),
+        Section({
           title: t('debugSection'),
           hint: t('debugSectionHint'),
           children: [
@@ -916,6 +1050,11 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dte-dbg-time' }, clockOf(entry?.at)),
           entry?.subagent === true ? h('span', { className: 'dte-dbg-badge' }, t('debugSubagent')) : null,
           h('span', { className: 'dte-dbg-purpose' }, purposeLabel(entry?.purpose, t)),
+          entry?.reason === 'exploration'
+            ? h('span', { className: 'dte-dbg-reason' }, t('debugReasonExploration'))
+            : entry?.reason === 'plan'
+              ? h('span', { className: 'dte-dbg-reason dte-dbg-reason-plan' }, t('debugReasonPlan'))
+              : null,
           h('span', { className: 'dte-dbg-levels' }, requested, ' → ', h('b', null, applied)),
           entry?.changed === true
             ? h('span', { className: 'dte-dbg-purpose', title: `${entry.from ?? '—'} → ${applied}` }, '⇄')
@@ -1027,7 +1166,7 @@ window.__ModuleLoader__.load({
       const copy = () => {
         const text = visible.map((entry) => {
           if (entry?.kind === 'request') {
-            return `${clockOf(entry.at)} ${entry.subagent === true ? '[sub]' : '[main]'} ${entry.provider}/${entry.model} ${entry.purpose ?? '-'} ${entry.requested ?? 'default'} -> ${entry.applied ?? 'default'}`;
+            return `${clockOf(entry.at)} ${entry.subagent === true ? '[sub]' : '[main]'} ${entry.provider}/${entry.model} ${entry.purpose ?? '-'} ${entry.requested ?? 'default'} -> ${entry.applied ?? 'default'}${entry.reason ? ` [${entry.reason}]` : ''}`;
           }
           if (entry?.kind === 'capability') return `${clockOf(entry.at)} [capability] ${(entry.declared ?? []).join(', ')}`;
           return `${clockOf(entry.at)} [config] ${configText(entry ?? {}, t)}`;

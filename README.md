@@ -91,6 +91,24 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
 
 窗口位置与展开状态记在浏览器本地，刷新页面后保持原样；「设置更新」「能力声明」也会作为事件出现在日志里，方便确认保存是否生效。
 
+### 自动难度（实验）
+
+默认**关闭**。打开后只对模型选择器里的 `Auto` 生效，不会覆盖你显式选的 `Low / High / Max`：
+
+- **探索阶段降档**：先按默认档跑一轮；若这一轮思考很贵（`reasoningTokens ≥ 1500`，可调）且本轮还没开始写文件/执行命令，**后续请求降到 `Low`**；一旦出现写/执行就恢复默认档。状态按会话隔离，每轮重置。
+  触发方式默认「自动」：供应商上报 reasoning tokens 时按阈值，**不上报时退回按轮次**（默认第一轮后触发）——很多 OpenAI 兼容网关不返回 reasoning tokens，这样才不会失效；也可以强制「按轮次」或「按思考 token」。
+- **计划模式**：计划模式是显式信号，Auto 会落到 `High`（可改为别的档），避免规划时被降档。
+- **不猜难度**：不看提示词、工具名或参数大小；只看“是否在探索”“上一轮思考多贵”“是否计划模式”这些确定性信号。
+- **优先级**：廉价调用 → 固定子代理档位 → 自动策略 → Auto 默认；自动档位一律 clamp 到模型已声明词表。
+
+设置页「自动难度（实验）」：总开关、探索降档开关/档位/触发方式/阈值/轮次、计划模式开关/档位。默认值 `auto / 1500 / 1 / Low / High`，建议先按默认跑几组任务，观察 HUD 里的「探索」标记再调。
+
+![设置页里的自动难度开关](docs/adaptive-settings.png)
+
+![探索阶段降档的实时日志](docs/adaptive-overlay.png)
+
+> 这是从 Reasonix 的实验性 reasoning governor 移植过来的机制（其 v1.39.11 已退役 enforcement，只留 shadow 遥测），所以这里也默认关闭、标注实验：纯思考型任务在探索阶段降档可能降低质量。失败升档、按子代理深度/preset 的多层映射不在本版本范围。
+
 ### 本插件的第一次使用
 
 装上后不需要额外配置：`Auto` 与档位由插件自动声明。选中 `Auto` 即按默认档运行；选 `Low / High / Max` 即固定该档；不选（原生「提供方默认」）在普通步骤上与 `Auto` 等效。
@@ -138,6 +156,14 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
     auxLevel: low
     autoScope: all
     subagentLevel: inherit
+    adaptiveEnabled: false
+    adaptiveExploration: true
+    adaptiveExplorationLevel: low
+    adaptiveTrigger: auto
+    adaptiveReasoningThreshold: 1500
+    adaptiveMinRounds: 1
+    adaptivePlanMode: true
+    adaptivePlanLevel: high
     debugOverlay: false
     trace: false
 ```
@@ -257,6 +283,23 @@ Turn on **Debug → Show the live effort-switch log in the conversation** and a 
 
 The window's position and open state persist in the browser, so a page refresh keeps them. Settings updates and capability declarations also appear as events, which makes a save's effect easy to confirm.
 
+### Automatic difficulty (experimental)
+
+Off by default. When on it applies only to the selector's `Auto`; an explicit `Low / High / Max` is never overridden:
+
+- **Exploration downgrade**: the first round runs at the default depth; if that round thought expensively (`reasoningTokens ≥ 1500`, configurable) and the turn has not written or executed anything yet, **later requests drop to `Low`**. The first write or local execution restores the default. State is per Session and resets every turn. The trigger defaults to `auto`: the reasoning threshold when the provider reports reasoning tokens, otherwise assistant rounds (most OpenAI-compatible gateways report none); `rounds` and `reasoning` force one rule.
+- **Plan mode**: an explicit signal, so Auto maps to `High` (configurable) instead of being downgraded while planning.
+- **No difficulty guessing**: prompt text, tool names, and argument sizes are never inspected; only deterministic signals (exploring, previous round's reasoning spend, plan mode) are used.
+- **Precedence**: cheap calls → fixed subagent depth → adaptive policy → Auto default; every adaptive depth is clamped to the model's declared vocabulary.
+
+Settings → Automatic thinking depth → **Automatic difficulty (experimental)**: master switch, exploration switch/depth/trigger/threshold/rounds, plan-mode switch/depth. Defaults are `auto / 1500 / 1 / Low / High`; run a few tasks with the HUD open and watch the `explore` badge before tuning.
+
+![The automatic-difficulty settings](docs/adaptive-settings.png)
+
+![The exploration downgrade in the live log](docs/adaptive-overlay.png)
+
+> This ports Reasonix's experimental reasoning governor (v1.39.11 retired its enforcement path and kept only shadow telemetry), so it stays opt-in and marked experimental: downgrading pure-reasoning tasks during exploration can hurt quality. Failure escalation and depth/preset maps are out of scope for this release.
+
 ### Features
 
 - Declares `reasoningEfforts` for DeepSeek models that carry none (gateway aliases included), so the selector finally has levels.
@@ -265,10 +308,11 @@ The window's position and open state persist in the browser, so a page refresh k
 - Cheap host-owned calls (`session-title`, `compaction`, `auto-review`) drop to `low` only when the model declares it, regardless of the session's own choice.
 - Idempotent: a second boot writes nothing; unload restores the original adapter registrations and retires a durable `auto`.
 - **Live debug window**: an opt-in, bounded, in-memory journal served over a Host route and rendered as a movable log over the conversation, subagent decisions included.
+- **Automatic difficulty (experimental)**: an opt-in exploration downgrade and plan-mode elevation for `Auto`, with explicit selections, cheap calls, and fixed subagent depths always taking precedence.
 
 ### Configuration
 
-Override the `think-effort` row in the profile's `cordis.patch.yml`; the fields are listed in the Chinese section above. `declareCapability`, `efforts`, `defaultEffort`, `auxPurposes`, `auxLevel`, `autoScope`, `subagentLevel`, `debugOverlay` and `trace` are the ones most often changed. Most users should use the visual settings page instead of editing this file.
+Override the `think-effort` row in the profile's `cordis.patch.yml`; the fields are listed in the Chinese section above. `declareCapability`, `efforts`, `defaultEffort`, `auxPurposes`, `auxLevel`, `autoScope`, `subagentLevel`, `adaptiveEnabled`, `debugOverlay` and `trace` are the ones most often changed. Most users should use the visual settings page instead of editing this file.
 
 ### Compatibility
 

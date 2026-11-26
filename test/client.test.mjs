@@ -173,7 +173,11 @@ test('both locales carry the navigation and debug labels', async () => {
   const en = fake.calls.locale.find((entry) => entry.language === 'en');
   assert.ok(zh?.dictionary.nav, 'zh dictionary needs the nav label');
   assert.ok(en?.dictionary.nav, 'en dictionary needs the nav label');
-  for (const key of ['debugSection', 'debugOverlayRow', 'debugTitle', 'debugEmpty', 'debugFilterCurrent']) {
+  for (const key of [
+    'debugSection', 'debugOverlayRow', 'debugTitle', 'debugEmpty', 'debugFilterCurrent',
+    'sectionAdaptive', 'adaptiveEnabledRow', 'adaptiveExplorationRow', 'adaptiveThresholdRow',
+    'debugReasonExploration', 'debugReasonPlan',
+  ]) {
     assert.ok(zh?.dictionary[key], `zh dictionary needs ${key}`);
     assert.ok(en?.dictionary[key], `en dictionary needs ${key}`);
   }

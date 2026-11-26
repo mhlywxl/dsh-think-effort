@@ -43,6 +43,23 @@
         autoScope: all
         # Subagent calls: inherit | auto | low/high/max. Applies immediately.
         subagentLevel: inherit
+        # Opt-in automatic difficulty (experimental; off by default). Only an
+        # Auto selection is considered; explicit levels and a fixed subagent
+        # level always win.
+        adaptiveEnabled: false
+        # Lower the depth after an expensive round while the turn still explores.
+        adaptiveExploration: true
+        adaptiveExplorationLevel: low
+        # Trigger rule: auto (reasoning tokens when the provider reports them,
+        # else assistant rounds) | rounds | reasoning.
+        adaptiveTrigger: auto
+        # Previous round's reasoning tokens that make exploration expensive.
+        adaptiveReasoningThreshold: 1500
+        # Assistant rounds in the turn before the exploration downgrade engages.
+        adaptiveMinRounds: 1
+        # Plan mode is an explicit signal: map it to its own depth.
+        adaptivePlanMode: true
+        adaptivePlanLevel: high
         # Record every effort decision for the conversation's floating debug
         # log (Settings -> Automatic thinking depth -> Debug). Off by default;
         # turning it on never changes a request.

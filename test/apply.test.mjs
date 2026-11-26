@@ -51,7 +51,7 @@ function fakeAdapter(efforts) {
 }
 
 /** Minimal Cordis-context stand-in: only what `apply` touches. */
-function fakeHost({ section = PI_AI_SECTION, adapter }) {
+function fakeHost({ section = PI_AI_SECTION, adapter, planMode, agentPresets }) {
   const updates = [];
   const listeners = new Map();
   const cleanups = [];
@@ -80,6 +80,8 @@ function fakeHost({ section = PI_AI_SECTION, adapter }) {
       if (name === 'settings') return settings;
       if (name === 'llm') return { adapters };
       if (name === 'agents') return agents;
+      if (name === 'planMode') return planMode;
+      if (name === 'agentPresets') return agentPresets;
       return undefined;
     },
     on(name, listener) {
@@ -383,4 +385,72 @@ test('the debug switch stays inert while off and follows a volatile save', async
   assert.deepEqual(kinds, ['config', 'request']);
   assert.equal(on.body.entries[0].debugOverlay, true);
   assert.equal(on.body.entries[1].applied, 'high');
+});
+
+test('adaptive exploration lowers later requests after an expensive round, and a write restores the default', async () => {
+  const adapter = fakeAdapter(['low', 'high', 'max']);
+  const host = fakeHost({ adapter });
+  host.agents.get = (id) => (id === 'root-1' ? { session: { header: { id: 'root-1' } } } : undefined);
+  apply(host.ctx, { adaptiveEnabled: true, adaptiveTrigger: 'reasoning', adaptiveReasoningThreshold: 1, debugOverlay: true });
+  await tick();
+  await tick();
+  const prepared = await host.adapters.get('aigw-coding').adapter.prepareCall('aigw-coding', 'deepseek-v4.1-flash-1017');
+
+  // First request of the turn: no previous reasoning round yet.
+  prepared.stream({ reasoningEffort: 'auto', sessionId: 'root-1', purpose: 'agent' });
+  // The first assistant round thought expensively; the next request drops.
+  host.ctx.emit('session/event', { id: 'root-1' }, { type: 'assistant/message', data: { usage: { reasoningTokens: 2000 } } });
+  prepared.stream({ reasoningEffort: 'auto', sessionId: 'root-1', purpose: 'agent' });
+  // A write ends the exploration phase and restores the default.
+  host.ctx.emit('session/event', { id: 'root-1' }, { type: 'tool/call', data: { name: 'write' } });
+  prepared.stream({ reasoningEffort: 'auto', sessionId: 'root-1', purpose: 'agent' });
+
+  assert.deepEqual(adapter.received, ['high', 'low', 'high']);
+
+  const answer = callRoute(host.routes.get('/think-effort/debug'), { url: '/think-effort/debug?since=0' });
+  const requests = answer.body.entries.filter((entry) => entry.kind === 'request');
+  assert.equal(requests[1].applied, 'low');
+  assert.equal(requests[1].reason, 'exploration');
+  assert.equal(requests[2].reason, null);
+  assert.equal(requests[2].phase, 'executing');
+});
+
+test('adaptive plan mode maps Auto to the configured plan depth', async () => {
+  const adapter = fakeAdapter(['low', 'high', 'max']);
+  const host = fakeHost({ adapter, planMode: { get: () => ({ active: true }) } });
+  host.agents.get = (id) => (id === 'root-1' ? { session: { header: { id: 'root-1' } } } : undefined);
+  apply(host.ctx, { adaptiveEnabled: true, adaptivePlanMode: true, adaptivePlanLevel: 'max', debugOverlay: true });
+  await tick();
+  await tick();
+  const prepared = await host.adapters.get('aigw-coding').adapter.prepareCall('aigw-coding', 'deepseek-v4.1-flash-1017');
+
+  prepared.stream({ reasoningEffort: 'auto', sessionId: 'root-1', purpose: 'agent' });
+  prepared.stream({ reasoningEffort: 'low', sessionId: 'root-1', purpose: 'agent' });
+  assert.deepEqual(adapter.received, ['max', 'low'], 'an explicit pick is never raised');
+
+  const answer = callRoute(host.routes.get('/think-effort/debug'), { url: '/think-effort/debug?since=0' });
+  const requests = answer.body.entries.filter((entry) => entry.kind === 'request');
+  assert.equal(requests[0].reason, 'plan');
+  assert.equal(requests[0].applied, 'max');
+  assert.equal(requests[1].switched, false);
+});
+
+
+test('plan mode is read through the agent-scoped preset service when the root lacks it', async () => {
+  const adapter = fakeAdapter(['low', 'high', 'max']);
+  const host = fakeHost({
+    adapter,
+    // The shipped composition mounts plan mode inside each agent's preset
+    // scope, so the profile root has no `planMode` service.
+    agentPresets: {
+      serviceFor: (_agent, name) => (name === 'planMode' ? { get: () => ({ active: true }) } : undefined),
+    },
+  });
+  host.agents.get = (id) => (id === 'root-1' ? { session: { header: { id: 'root-1' } } } : undefined);
+  apply(host.ctx, { adaptiveEnabled: true, adaptivePlanMode: true, adaptivePlanLevel: 'max' });
+  await tick();
+  await tick();
+  const prepared = await host.adapters.get('aigw-coding').adapter.prepareCall('aigw-coding', 'deepseek-v4.1-flash-1017');
+  prepared.stream({ reasoningEffort: 'auto', sessionId: 'root-1', purpose: 'agent' });
+  assert.deepEqual(adapter.received, ['max']);
 });

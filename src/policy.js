@@ -92,6 +92,22 @@ export const DEFAULT_CONFIG = {
    * id forces that depth (clamped to the model's declared vocabulary).
    */
   subagentLevel: 'inherit',
+  /** Opt-in automatic difficulty policy (off by default). */
+  adaptiveEnabled: false,
+  /** Lower the depth while a turn is still exploring after an expensive round. */
+  adaptiveExploration: true,
+  /** Depth used during the exploration phase. */
+  adaptiveExplorationLevel: 'low',
+  /** Previous round's reasoning tokens that make exploration expensive. */
+  adaptiveReasoningThreshold: 1500,
+  /** Trigger rule: `auto` (reasoning when reported, else rounds), `rounds`, `reasoning`. */
+  adaptiveTrigger: 'auto',
+  /** Assistant rounds in the turn before the exploration downgrade engages. */
+  adaptiveMinRounds: 1,
+  /** Explicit plan mode maps to a higher depth. */
+  adaptivePlanMode: true,
+  /** Depth used while plan mode is active. */
+  adaptivePlanLevel: 'high',
   /** Record every effort decision for the conversation's floating debug log. */
   debugOverlay: false,
   /** Diagnostic stderr trace of each decision. */
@@ -105,6 +121,21 @@ export function normalizeConfig(raw) {
   if (!Array.isArray(config.auxPurposes)) config.auxPurposes = [...DEFAULT_CONFIG.auxPurposes];
   if (!Array.isArray(config.deepseekHosts)) config.deepseekHosts = [...DEFAULT_CONFIG.deepseekHosts];
   if (!Array.isArray(config.declareModels)) config.declareModels = [];
+  // A threshold is a non-negative token count; a broken value must not make the
+  // policy behave as "always zero".
+  if (typeof config.adaptiveReasoningThreshold !== 'number'
+    || !Number.isFinite(config.adaptiveReasoningThreshold)
+    || config.adaptiveReasoningThreshold < 0) {
+    config.adaptiveReasoningThreshold = DEFAULT_CONFIG.adaptiveReasoningThreshold;
+  }
+  if (config.adaptiveTrigger !== 'rounds' && config.adaptiveTrigger !== 'reasoning') {
+    config.adaptiveTrigger = 'auto';
+  }
+  if (typeof config.adaptiveMinRounds !== 'number'
+    || !Number.isFinite(config.adaptiveMinRounds)
+    || config.adaptiveMinRounds < 1) {
+    config.adaptiveMinRounds = DEFAULT_CONFIG.adaptiveMinRounds;
+  }
   return config;
 }
 
@@ -411,15 +442,17 @@ function autoTarget(cfg, efforts, defaultEffort) {
  *    unconditionally, because a session's own depth never applies to a bounded
  *    summary request.
  * 2. A subagent-owned call with `subagentLevel` set → that level, or the
- *    plugin's `auto` resolution for `auto`. The child's own selection and
+ *    plugin's `auto` resolution for `auto`. A fixed pin outranks the adaptive
+ *    suggestion; `auto` lets it through. The child's own selection and
  *    inherited parent selection are overridden only when the user opted in.
  * 3. An explicit level → `undefined`: a user pick is passed through untouched
  *    (DSH validates it against the same vocabulary, so an undeclared pick never
  *    reaches the wire).
  * 4. No explicit selection on an ordinary call → `undefined`: the adapter's own
  *    default stands (with the declaration above, that is `high`).
- * 5. `auto` → the declared route default (DeepSeek: `high`), or the
- *    highest declared depth when the route names none.
+ * 5. `auto` → the adaptive suggestion when the opt-in policy produced one,
+ *    otherwise the declared route default (DeepSeek: `high`), or the highest
+ *    declared depth when the route names none.
  *
  * @param {object} input decision inputs.
  * @param {string} [input.requested] the selection's effort.
@@ -427,10 +460,12 @@ function autoTarget(cfg, efforts, defaultEffort) {
  * @param {boolean} [input.isSubagent] whether the call belongs to a subagent session.
  * @param {readonly object[]} [input.efforts] declared vocabulary.
  * @param {string} [input.defaultEffort] route/model default depth.
+ * @param {string} [input.adaptiveLevel] the automatic-difficulty suggestion for
+ *   an `auto` request, already limited to the request's session and phase.
  * @param {object} rawCfg plugin config.
  * @returns {string | undefined} the level to send, or undefined to leave the request alone.
  */
-export function resolveCallEffort({ requested, purpose, isSubagent, efforts, defaultEffort }, rawCfg) {
+export function resolveCallEffort({ requested, purpose, isSubagent, efforts, defaultEffort, adaptiveLevel }, rawCfg) {
   const cfg = normalizeConfig(rawCfg);
   const depths = depthLevels(efforts);
   if (depths.length === 0) return undefined;
@@ -441,12 +476,16 @@ export function resolveCallEffort({ requested, purpose, isSubagent, efforts, def
   // still win, because a summary request has no task difficulty to describe.
   if (isSubagent === true && cfg.subagentLevel !== undefined && cfg.subagentLevel !== 'inherit') {
     if (aux !== undefined) return aux;
-    return cfg.subagentLevel === AUTO_EFFORT
-      ? autoTarget(cfg, efforts, defaultEffort)
-      : clampEffort(cfg.subagentLevel, efforts);
+    if (cfg.subagentLevel !== AUTO_EFFORT) return clampEffort(cfg.subagentLevel, efforts);
+    // `auto` for subagents is the same Auto the selector offers, so the
+    // adaptive policy may suggest a depth for it as well.
+    return adaptiveLevel !== undefined
+      ? clampEffort(adaptiveLevel, efforts)
+      : autoTarget(cfg, efforts, defaultEffort);
   }
   if (requested !== undefined && requested !== AUTO_EFFORT) return undefined;
   if (aux !== undefined) return aux;
   if (requested === undefined) return undefined;
+  if (adaptiveLevel !== undefined) return clampEffort(adaptiveLevel, efforts);
   return autoTarget(cfg, efforts, defaultEffort);
 }

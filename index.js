@@ -43,12 +43,14 @@ import z from '@deepseek-ai/schemastery';
 
 import {
   DEFAULT_CONFIG,
+  isAuxPurpose,
   normalizeConfig,
   planCapabilitySection,
   resolveCallEffort,
   shouldDeclare,
   withAutoEffort,
 } from './src/policy.js';
+import { createAdaptivePolicy } from './src/adaptive.js';
 import { createDebugJournal, registerDebugRoutes } from './src/debug.js';
 
 /** The llm-pi-ai settings entry id in a composed profile. */
@@ -89,6 +91,22 @@ export const Config = z.object({
   auxLevel: z.string().default(DEFAULT_CONFIG.auxLevel).volatile(),
   /** Subagent-owned calls: `inherit`, `auto`, or a fixed level. */
   subagentLevel: z.string().default(DEFAULT_CONFIG.subagentLevel).volatile(),
+  /** Opt-in automatic difficulty policy; off by default. */
+  adaptiveEnabled: z.boolean().default(DEFAULT_CONFIG.adaptiveEnabled).volatile(),
+  /** Lower the depth while a turn is still exploring after an expensive round. */
+  adaptiveExploration: z.boolean().default(DEFAULT_CONFIG.adaptiveExploration).volatile(),
+  /** Depth used during the exploration phase. */
+  adaptiveExplorationLevel: z.string().default(DEFAULT_CONFIG.adaptiveExplorationLevel).volatile(),
+  /** Previous round's reasoning tokens that make exploration expensive. */
+  adaptiveReasoningThreshold: z.number().default(DEFAULT_CONFIG.adaptiveReasoningThreshold).volatile(),
+  /** Trigger rule: `auto` (reasoning when reported, else rounds), `rounds`, `reasoning`. */
+  adaptiveTrigger: z.union([z.const('auto'), z.const('rounds'), z.const('reasoning')]).default(DEFAULT_CONFIG.adaptiveTrigger).volatile(),
+  /** Assistant rounds in the turn before the exploration downgrade engages. */
+  adaptiveMinRounds: z.number().default(DEFAULT_CONFIG.adaptiveMinRounds).volatile(),
+  /** Explicit plan mode maps to a higher depth. */
+  adaptivePlanMode: z.boolean().default(DEFAULT_CONFIG.adaptivePlanMode).volatile(),
+  /** Depth used while plan mode is active. */
+  adaptivePlanLevel: z.string().default(DEFAULT_CONFIG.adaptivePlanLevel).volatile(),
   /**
    * Record every effort decision in a bounded in-memory journal and serve it to
    * the conversation's floating debug log. Off by default; when off the journal
@@ -354,8 +372,9 @@ export function apply(ctx, rawConfig) {
    * @param {string} input.model model id.
    * @param {object} input.options the request options the adapter receives.
    * @param {string} [input.level] the level the plugin applied, if any.
+   * @param {object} [input.adaptive] the automatic-difficulty decision.
    */
-  const debugRequest = ({ provider, model, options, level }) => {
+  const debugRequest = ({ provider, model, options, level, adaptive = {} }) => {
     if (debugOn() !== true) return;
     // An ordinary agent step usually carries no purpose; name it explicitly so
     // the browser half can label it instead of showing "unknown".
@@ -377,7 +396,71 @@ export function apply(ctx, rawConfig) {
       switched: level !== undefined && level !== requested,
       from: previous,
       changed: previous !== null && previous !== applied,
+      reason: adaptive.reason ?? null,
+      phase: adaptive.phase ?? null,
     });
+  };
+
+  // ── adaptive difficulty ──────────────────────────────────────────────────
+  // Opt-in policy: the phase state is folded from committed Session events and
+  // only consulted for `auto` requests. Every state is per Session, so parallel
+  // subagents never inherit each other's phase.
+  const adaptive = createAdaptivePolicy();
+  ctx.on('session/event', (session, event) => {
+    if (config.adaptiveEnabled !== true) return;
+    const sessionId = session?.id ?? session?.header?.id;
+    if (typeof sessionId !== 'string' || sessionId === '') return;
+    try {
+      adaptive.observe(sessionId, event);
+    } catch {
+      /* a malformed event must not affect a turn */
+    }
+  });
+
+  /** Whether plan mode is active for one live Session. */
+  const planStateOf = (sessionId) => {
+    if (typeof sessionId !== 'string' || sessionId === '') return { active: false, why: 'no-session' };
+    try {
+      const agent = ctx.get('agents')?.get?.(sessionId);
+      if (agent === undefined) return { active: false, why: 'no-agent' };
+      // Plan mode is composed per agent preset, so its service may live in the
+      // agent's own context rather than the profile root; ask the preset
+      // registry for the agent-scoped face first and keep a root fallback for
+      // compositions that mount it globally.
+      const planMode = ctx.get('agentPresets')?.serviceFor?.(agent, 'planMode') ?? ctx.get('planMode');
+      if (planMode === undefined) return { active: false, why: 'no-service' };
+      const state = planMode.get(agent);
+      return { active: state?.active === true, why: `state:${String(state?.active)}:${String(state?.pending)}` };
+    } catch (error) {
+      return { active: false, why: `error:${error instanceof Error ? error.message : String(error)}` };
+    }
+  };
+
+  /**
+   * Ask the adaptive policy for one request's suggestion.
+   *
+   * Cheap calls and a fixed `subagentLevel` keep their precedence: the policy
+   * is not consulted for them at all, so a journal reason always describes a
+   * decision that could actually apply.
+   * @param {object} input request facts.
+   * @param {string} [input.requested] the selection's effort.
+   * @param {string} [input.purpose] LLM request purpose.
+   * @param {boolean} input.isSubagent whether the call belongs to a subagent.
+   * @param {string} [input.sessionId] stamped session identity.
+   * @returns {object} the policy decision.
+   */
+  const adaptiveDecisionFor = ({ requested, purpose, isSubagent, sessionId }) => {
+    const none = { level: undefined, reason: null, phase: null };
+    if (config.adaptiveEnabled !== true) return none;
+    if (requested !== 'auto') return none;
+    if (isAuxPurpose(purpose, config)) return none;
+    if (isSubagent === true && config.subagentLevel !== 'inherit' && config.subagentLevel !== 'auto') return none;
+    const planState = planStateOf(sessionId);
+    const decision = adaptive.decide(sessionId, { requested, planActive: planState.active, config });
+    if (config.trace === true) {
+      trace('adaptive: session=%s plan=%s (%s) level=%s reason=%s', String(sessionId), planState.active, planState.why, String(decision.level), String(decision.reason));
+    }
+    return decision;
   };
 
   // ── capability declaration ───────────────────────────────────────────────
@@ -437,14 +520,22 @@ export function apply(ctx, rawConfig) {
       if (config.enabled === false) return options;
       if (options === null || typeof options !== 'object') return options;
       const reasoning = info !== null && typeof info === 'object' ? info.reasoning : undefined;
+      const subagent = isSubagentSession(options.sessionId);
+      const adaptiveDecision = adaptiveDecisionFor({
+        requested: options.reasoningEffort,
+        purpose: options.purpose,
+        isSubagent: subagent,
+        sessionId: options.sessionId,
+      });
       const level = resolveCallEffort({
         requested: options.reasoningEffort,
         purpose: options.purpose,
-        isSubagent: isSubagentSession(options.sessionId),
+        isSubagent: subagent,
         efforts: reasoning !== null && typeof reasoning === 'object' ? reasoning.efforts : undefined,
         defaultEffort: reasoning !== null && typeof reasoning === 'object' ? reasoning.defaultEffort : undefined,
+        adaptiveLevel: adaptiveDecision.level,
       }, config);
-      debugRequest({ provider, model, options, level });
+      debugRequest({ provider, model, options, level, adaptive: adaptiveDecision });
       if (level === undefined || level === options.reasoningEffort) return options;
       const key = `${provider}/${model}/${String(options.purpose ?? '-')}/${level}`;
       trace('translate: %s/%s purpose=%s requested=%s -> %s', provider, model, String(options.purpose ?? '-'), String(options.reasoningEffort), level);
@@ -534,6 +625,7 @@ export function apply(ctx, rawConfig) {
     trace('volatile update: enabled=%s subagentLevel=%s', config.enabled, config.subagentLevel);
     debugRecord('config', {
       enabled: config.enabled,
+      adaptiveEnabled: config.adaptiveEnabled,
       debugOverlay: config.debugOverlay,
       autoLevel: config.autoLevel,
       defaultEffort: config.defaultEffort,

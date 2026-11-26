@@ -248,3 +248,57 @@ test('a subagent pin outranks the child selection but yields to cheap calls', ()
   // Without a subagent session the pin does not leak into ordinary steps.
   assert.equal(resolveCallEffort({ requested: 'max', efforts: vocab, defaultEffort: 'high' }, pinnedLow), undefined);
 });
+
+test('adaptive suggestions only reach Auto, and lose to aux calls and fixed subagent pins', () => {
+  const vocab = effortsOf('auto', 'low', 'high', 'max');
+  const cfg = normalizeConfig({});
+  const base = { efforts: vocab, defaultEffort: 'high', adaptiveLevel: 'low' };
+
+  // Auto takes the suggestion; an explicit pick is never rewritten.
+  assert.equal(resolveCallEffort({ ...base, requested: 'auto' }, cfg), 'low');
+  assert.equal(resolveCallEffort({ ...base, requested: 'max' }, cfg), undefined);
+  assert.equal(resolveCallEffort({ ...base }, cfg), undefined);
+
+  // An undeclared suggestion clamps instead of inventing a level.
+  assert.equal(resolveCallEffort({ ...base, requested: 'auto', adaptiveLevel: 'medium' }, cfg), 'high');
+
+  // Cheap calls keep their own downgrade.
+  assert.equal(resolveCallEffort({
+    ...base,
+    requested: 'auto',
+    purpose: 'session-title',
+  }, normalizeConfig({ auxLevel: 'high' })), 'high');
+
+  // A fixed subagent pin outranks the suggestion; `auto` lets it through.
+  assert.equal(resolveCallEffort({
+    ...base,
+    requested: 'auto',
+    isSubagent: true,
+  }, normalizeConfig({ subagentLevel: 'max' })), 'max');
+  assert.equal(resolveCallEffort({
+    ...base,
+    requested: 'auto',
+    isSubagent: true,
+  }, normalizeConfig({ subagentLevel: 'auto' })), 'low');
+  assert.equal(resolveCallEffort({
+    ...base,
+    requested: 'auto',
+    isSubagent: true,
+  }, normalizeConfig({ subagentLevel: 'inherit' })), 'low');
+});
+
+test('a broken adaptive threshold falls back to the documented default', () => {
+  assert.equal(normalizeConfig({ adaptiveReasoningThreshold: -1 }).adaptiveReasoningThreshold, 1500);
+  assert.equal(normalizeConfig({ adaptiveReasoningThreshold: Number.NaN }).adaptiveReasoningThreshold, 1500);
+  assert.equal(normalizeConfig({ adaptiveReasoningThreshold: 0 }).adaptiveReasoningThreshold, 0);
+});
+
+
+test('adaptive trigger settings normalize to safe defaults', () => {
+  assert.equal(normalizeConfig({ adaptiveTrigger: 'nonsense' }).adaptiveTrigger, 'auto');
+  assert.equal(normalizeConfig({ adaptiveTrigger: 'rounds' }).adaptiveTrigger, 'rounds');
+  assert.equal(normalizeConfig({ adaptiveTrigger: 'reasoning' }).adaptiveTrigger, 'reasoning');
+  assert.equal(normalizeConfig({ adaptiveMinRounds: 0 }).adaptiveMinRounds, 1);
+  assert.equal(normalizeConfig({ adaptiveMinRounds: 3 }).adaptiveMinRounds, 3);
+  assert.equal(normalizeConfig({ adaptiveMinRounds: Number.NaN }).adaptiveMinRounds, 1);
+});

@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Automatic thinking depth",
-    "description": "Adds Auto to the model selector for reasoning models and resolves it per request: the declared default for normal steps (high on DeepSeek), Low for cheap host-owned calls, and an optional depth just for subagents — all editable on a live visual settings page. A debug switch shows every request's effort decision (subagents included) in a floating log over the conversation.",
+    "description": "Adds Auto to the model selector for reasoning models and resolves it per request: the declared default for normal steps (high on DeepSeek), Low for cheap host-owned calls, and an optional depth just for subagents — all editable on a live visual settings page. A debug switch shows every request's effort decision (subagents included) in a floating log over the conversation, and an experimental opt-in automatic difficulty lowers depth during exploration and raises it in plan mode (Auto only).",
     "detail": "docs/DETAIL.en.md"
   }
 }
