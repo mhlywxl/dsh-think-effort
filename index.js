@@ -51,6 +51,7 @@ import {
   withAutoEffort,
 } from './src/policy.js';
 import { createAdaptivePolicy } from './src/adaptive.js';
+import { buildParallelPolicy } from './src/parallel.js';
 import { createDebugJournal, registerDebugRoutes } from './src/debug.js';
 
 /** The llm-pi-ai settings entry id in a composed profile. */
@@ -107,6 +108,12 @@ export const Config = z.object({
   adaptivePlanMode: z.boolean().default(DEFAULT_CONFIG.adaptivePlanMode).volatile(),
   /** Depth used while plan mode is active. */
   adaptivePlanLevel: z.string().default(DEFAULT_CONFIG.adaptivePlanLevel).volatile(),
+  /** Inject an optional parallel-work policy into the system prompt. */
+  parallelEnabled: z.boolean().default(DEFAULT_CONFIG.parallelEnabled).volatile(),
+  /** Fan-out cap for write tasks named by that policy. */
+  parallelWriteFanout: z.number().default(DEFAULT_CONFIG.parallelWriteFanout).volatile(),
+  /** Fan-out cap for read-only tasks named by that policy. */
+  parallelReadFanout: z.number().default(DEFAULT_CONFIG.parallelReadFanout).volatile(),
   /**
    * Record every effort decision in a bounded in-memory journal and serve it to
    * the conversation's floating debug log. Off by default; when off the journal
@@ -463,6 +470,27 @@ export function apply(ctx, rawConfig) {
     return decision;
   };
 
+  // ── optional parallel-work policy ────────────────────────────────────────
+  // A system-prompt section, not a tool: the policy changes how the model
+  // plans, while the existing workflow/subagent tools stay the execution path.
+  // The section text is a function over the live row config, so the switch
+  // takes effect on the next assembled step without a remount.
+  const systemPrompt = ctx.get('systemPrompt');
+  if (systemPrompt?.section !== undefined) {
+    ctx.effect(() => systemPrompt.section({
+      name: 'think-effort:parallel-work',
+      order: 700,
+      text: () => {
+        const policy = readConfig(config);
+        const text = buildParallelPolicy(policy);
+        if (policy.trace === true) {
+          trace('parallel-policy: enabled=%s chars=%d', String(policy.parallelEnabled), text.length);
+        }
+        return text;
+      },
+    }), 'think-effort: parallel work');
+  }
+
   // ── capability declaration ───────────────────────────────────────────────
   /** Serialize settings writes; a boot burst must not stack whole-section updates. */
   let syncTail = Promise.resolve();
@@ -626,6 +654,7 @@ export function apply(ctx, rawConfig) {
     debugRecord('config', {
       enabled: config.enabled,
       adaptiveEnabled: config.adaptiveEnabled,
+      parallelEnabled: config.parallelEnabled,
       debugOverlay: config.debugOverlay,
       autoLevel: config.autoLevel,
       defaultEffort: config.defaultEffort,

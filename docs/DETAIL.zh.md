@@ -43,6 +43,19 @@
 - **可观测**：调试悬浮窗给这类行加「探索 / 计划」标记，journal 记录 `reason`/`phase`。
 - **范围**：本版本不含失败升档、按深度/preset 的多层映射，也不按提示词/工具名猜难度。
 
+## 并行工作（实验）
+
+独立的 `parallelEnabled` 总开关，默认关闭。打开后由 Host 通过 `ctx.systemPrompt.section({ name: 'think-effort:parallel-work', order: 700, text })` 注入一段策略文本；`text` 是读取 volatile 配置的函数，关闭时返回空串，因此切换在**下一次请求装配**时生效，不重挂任何服务。
+
+策略只教模型“何时拆、怎么拆、何时不要拆”，执行仍然走 DSH 已有的 `subagent` / `workflow`：
+
+- 1–2 个独立单元 → 同一步多个 `subagent` 调用；
+- 3+ → `workflow` 的 `parallel()` / `pipeline()`；
+- 写路径不重叠；共享文件单写者；有依赖走顺序阶段；
+- 扇出上限 `parallelWriteFanout`（默认 4）/ `parallelReadFanout`（默认 8）；
+- 父代理集成、验证后才汇报；长全量测试用 `run_in_background`；
+- 不拿 subagent/workflow 跑测试。
+
 ## 设置页从哪里来
 
 - 插件行页面注册进插件管理器的 `plugins.row.config`，键为 `dsh-think-effort#think-effort`；
@@ -79,6 +92,9 @@
 | `adaptiveTrigger` | `auto` | `auto` / `rounds` / `reasoning` |
 | `adaptiveReasoningThreshold` | `1500` | reasoning 规则的触发阈值 |
 | `adaptiveMinRounds` | `1` | rounds 规则的触发轮次 |
+| `parallelEnabled` | `false` | 并行工作策略总开关（实验；只改模型行为） |
+| `parallelWriteFanout` | `4` | 写任务扇出上限（1–8） |
+| `parallelReadFanout` | `8` | 只读任务扇出上限（1–12） |
 | `adaptivePlanMode` | `true` | 计划模式映射高档 |
 | `adaptivePlanLevel` | `high` | 计划模式档位 |
 | `debugOverlay` | `false` | 会话界面的实时档位切换日志（只记录，不改请求；Host 内存最多 300 条） |

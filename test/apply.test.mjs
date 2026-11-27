@@ -51,7 +51,7 @@ function fakeAdapter(efforts) {
 }
 
 /** Minimal Cordis-context stand-in: only what `apply` touches. */
-function fakeHost({ section = PI_AI_SECTION, adapter, planMode, agentPresets }) {
+function fakeHost({ section = PI_AI_SECTION, adapter, planMode, agentPresets, systemPrompt }) {
   const updates = [];
   const listeners = new Map();
   const cleanups = [];
@@ -82,6 +82,7 @@ function fakeHost({ section = PI_AI_SECTION, adapter, planMode, agentPresets }) 
       if (name === 'agents') return agents;
       if (name === 'planMode') return planMode;
       if (name === 'agentPresets') return agentPresets;
+      if (name === 'systemPrompt') return systemPrompt;
       return undefined;
     },
     on(name, listener) {
@@ -453,4 +454,51 @@ test('plan mode is read through the agent-scoped preset service when the root la
   const prepared = await host.adapters.get('aigw-coding').adapter.prepareCall('aigw-coding', 'deepseek-v4.1-flash-1017');
   prepared.stream({ reasoningEffort: 'auto', sessionId: 'root-1', purpose: 'agent' });
   assert.deepEqual(adapter.received, ['max']);
+});
+
+
+test('the parallel-work section follows the switch and its fan-out caps', async () => {
+  const sections = [];
+  const systemPrompt = {
+    section(definition) {
+      sections.push(definition);
+      return () => {};
+    },
+  };
+  const host = fakeHost({ adapter: fakeAdapter(['low', 'high', 'max']), systemPrompt });
+  apply(host.ctx, {
+    parallelEnabled: true,
+    parallelWriteFanout: 3,
+    parallelReadFanout: 6,
+  });
+  await tick();
+
+  assert.equal(sections.length, 1, 'exactly one policy section is registered');
+  const section = sections[0];
+  assert.equal(section.name, 'think-effort:parallel-work');
+  assert.equal(section.order, 700);
+  const text = section.text({});
+  assert.match(text, /subagent/);
+  assert.match(text, /workflow/);
+  assert.match(text, /写任务 3 个/);
+  assert.match(text, /只读任务 6 个/);
+  assert.match(text, /用 `subagent`\/`workflow` 来跑测试/);
+
+  // A disabled config must contribute nothing, not a stale cached text.
+  const offSections = [];
+  const offHost = fakeHost({
+    adapter: fakeAdapter(['low', 'high', 'max']),
+    systemPrompt: { section: (definition) => { offSections.push(definition); return () => {}; } },
+  });
+  apply(offHost.ctx, { parallelEnabled: false });
+  await tick();
+  assert.equal(offSections[0].text({}), '');
+});
+
+test('the parallel-work section is skipped when the composition has no system prompt', async () => {
+  const host = fakeHost({ adapter: fakeAdapter(['low', 'high', 'max']) });
+  apply(host.ctx, { parallelEnabled: true });
+  await tick();
+  // Reaching this point without a throw is the contract: a composition without
+  // a system-prompt service still boots the rest of the plugin.
 });

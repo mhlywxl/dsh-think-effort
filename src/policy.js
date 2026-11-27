@@ -108,6 +108,12 @@ export const DEFAULT_CONFIG = {
   adaptivePlanMode: true,
   /** Depth used while plan mode is active. */
   adaptivePlanLevel: 'high',
+  /** Inject the optional parallel-work policy into the system prompt. */
+  parallelEnabled: false,
+  /** Fan-out cap for write tasks named by the policy. */
+  parallelWriteFanout: 4,
+  /** Fan-out cap for read-only tasks named by the policy. */
+  parallelReadFanout: 8,
   /** Record every effort decision for the conversation's floating debug log. */
   debugOverlay: false,
   /** Diagnostic stderr trace of each decision. */
@@ -135,6 +141,14 @@ export function normalizeConfig(raw) {
     || !Number.isFinite(config.adaptiveMinRounds)
     || config.adaptiveMinRounds < 1) {
     config.adaptiveMinRounds = DEFAULT_CONFIG.adaptiveMinRounds;
+  }
+  // The fan-out caps are advertised in the prompt text, so keep them in the
+  // range the policy can honestly claim rather than passing a wild number on.
+  for (const [key, max] of [['parallelWriteFanout', 8], ['parallelReadFanout', 12]]) {
+    const value = config[key];
+    config[key] = typeof value === 'number' && Number.isFinite(value)
+      ? Math.min(max, Math.max(1, Math.round(value)))
+      : DEFAULT_CONFIG[key];
   }
   return config;
 }

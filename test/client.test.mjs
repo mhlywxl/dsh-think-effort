@@ -182,3 +182,20 @@ test('both locales carry the navigation and debug labels', async () => {
     assert.ok(en?.dictionary[key], `en dictionary needs ${key}`);
   }
 });
+
+
+test('the parallel-work section has bilingual copy for every new control', async () => {
+  const definition = await loadClient();
+  const fake = fakeCordis();
+  definition.apply(fake.ctx);
+  const zh = fake.calls.locale.find((entry) => entry.language === 'zh').dictionary;
+  const en = fake.calls.locale.find((entry) => entry.language === 'en').dictionary;
+  for (const key of [
+    'sectionParallel', 'parallelSectionHint', 'parallelEnabledRow', 'parallelEnabledHint',
+    'parallelWriteFanoutRow', 'parallelWriteFanoutHint',
+    'parallelReadFanoutRow', 'parallelReadFanoutHint', 'parallelFanoutInvalid',
+  ]) {
+    assert.equal(typeof zh[key], 'string', `zh.${key} must exist`);
+    assert.equal(typeof en[key], 'string', `en.${key} must exist`);
+  }
+});

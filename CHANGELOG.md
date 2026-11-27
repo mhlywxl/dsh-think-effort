@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0 — 2026-11-27
+
+- **并行工作策略（实验，默认关闭）**：新增 `parallelEnabled` 开关。打开后通过 `ctx.systemPrompt.section()` 注入一段策略（order 700），提示模型在合适时把任务拆成互不阻塞的单元：
+  - 1–2 个独立单元 → 同一步多个 `subagent` 调用（并发执行）；
+  - 3 个以上 → `workflow` 的 `parallel()` / `pipeline()`，每个 child 写清目标、允许修改的文件、验证命令和返回 JSON；
+  - 写路径不重叠、共享文件单写者、有依赖走顺序阶段；
+  - 写任务扇出上限 `parallelWriteFanout`（默认 4）、只读 `parallelReadFanout`（默认 8）；
+  - 父代理负责集成与验证后才汇报；长全量测试用 `run_in_background`；
+  - 明确不用 subagent/workflow 跑测试；子代理只完成自己的单元，不再递归拆分。
+- **独立于档位策略**：不改写任何模型请求、不增加工具权限、不额外发请求；`text` 读取 volatile 配置并在关闭时返回空串，所以开关在**下一次请求装配**生效，不需要重启/重挂。
+- 设置页新增「并行工作（实验）」区块（总开关、写扇出、只读扇出）；README / DETAIL（中英）与 `cordis.patch.yml` 同步。
+- 测试：`node --test` **61 项全绿**（新增并行策略文本/开关/扇出 clamp、Host 注入与客户端双语文案测试）。
+- 说明：上一轮验证用的用户全局 `~/.dsh/AGENTS.md` 策略已迁移进插件开关，不再全局常开。
+
 ## 0.6.0 — 2026-11-26
 
 - **自动难度（实验，默认关闭）**：新增 `adaptiveEnabled` 总开关。打开后只对模型选择器里的 `Auto` 生效：

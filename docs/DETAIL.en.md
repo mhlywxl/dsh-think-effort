@@ -43,6 +43,19 @@ The opt-in `adaptiveEnabled` switch. When on it applies only to the selector's `
 - **Observability**: the floating log tags these rows `explore` / `plan`, and the journal records `reason`/`phase`.
 - **Scope**: no failure escalation and no depth/preset maps in this release; it never guesses from prompt text or tool names.
 
+## Parallel work (experimental)
+
+An independent `parallelEnabled` master switch, off by default. When on, the Host contributes `ctx.systemPrompt.section({ name: 'think-effort:parallel-work', order: 700, text })`. The text is a function over the volatile row config and returns an empty string while off, so a switch takes effect on the **next prompt assembly** without remounting a service.
+
+The policy only teaches the model *when* and *how* to split; execution still uses DSH's existing `subagent` / `workflow`:
+
+- 1–2 independent units → several `subagent` calls in one step;
+- 3+ → `workflow` with `parallel()` / `pipeline()`;
+- disjoint write paths; one writer per shared file; ordered stages for dependencies;
+- fan-out caps `parallelWriteFanout` (default 4) / `parallelReadFanout` (default 8);
+- the parent integrates and verifies before reporting; long full suites use `run_in_background`;
+- never uses subagent/workflow to run tests.
+
 ## Where the settings page comes from
 
 - The row page registers into the plugin manager's `plugins.row.config`, keyed `dsh-think-effort#think-effort`.
@@ -79,6 +92,9 @@ The opt-in `adaptiveEnabled` switch. When on it applies only to the selector's `
 | `adaptiveTrigger` | `auto` | `auto` / `rounds` / `reasoning` |
 | `adaptiveReasoningThreshold` | `1500` | Threshold for the reasoning rule |
 | `adaptiveMinRounds` | `1` | Round count for the rounds rule |
+| `parallelEnabled` | `false` | Parallel-work policy switch (experimental; model behavior only) |
+| `parallelWriteFanout` | `4` | Write-task fan-out cap (1–8) |
+| `parallelReadFanout` | `8` | Read-only fan-out cap (1–12) |
 | `adaptivePlanMode` | `true` | Map plan mode to a higher depth |
 | `adaptivePlanLevel` | `high` | Depth used in plan mode |
 | `debugOverlay` | `false` | Live effort-switch log over the conversation (records only, never rewrites; 300 records in Host memory) |

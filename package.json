@@ -1,8 +1,8 @@
 {
   "name": "dsh-think-effort",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
-  "description": "Automatic thinking depth for DeepSeek routes in DeepSeek Harness: declare the model's effort vocabulary, add Auto to the model selector, resolve it to the declared default, give subagents their own depth, drop cheap host-owned calls to Low, edit every rule on a live visual settings page, watch each request's effort decision in a floating debug log, and optionally lower depth during exploration with the experimental adaptive policy.",
+  "description": "Automatic thinking depth for DeepSeek routes in DeepSeek Harness: declare the model's effort vocabulary, add Auto to the model selector, resolve it to the declared default, give subagents their own depth, drop cheap host-owned calls to Low, edit every rule on a live visual settings page, watch each request's effort decision in a floating debug log, optionally lower depth during exploration with the experimental adaptive policy, and optionally inject a parallel-work policy that tells the model to split independent work across subagents/workflow.",
   "icon": "./icon.svg",
   "license": "MIT",
   "author": "mhlywxl",
@@ -18,7 +18,9 @@
     "debug-overlay",
     "live-log",
     "adaptive-effort",
-    "exploration"
+    "exploration",
+    "parallel-work",
+    "task-orchestration"
   ],
   "exports": {
     ".": "./index.js",

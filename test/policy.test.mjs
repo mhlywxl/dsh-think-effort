@@ -302,3 +302,13 @@ test('adaptive trigger settings normalize to safe defaults', () => {
   assert.equal(normalizeConfig({ adaptiveMinRounds: 3 }).adaptiveMinRounds, 3);
   assert.equal(normalizeConfig({ adaptiveMinRounds: Number.NaN }).adaptiveMinRounds, 1);
 });
+
+
+test('parallel fan-out caps stay inside the advertised range', () => {
+  assert.equal(normalizeConfig({ parallelWriteFanout: 99 }).parallelWriteFanout, 8);
+  assert.equal(normalizeConfig({ parallelWriteFanout: 0 }).parallelWriteFanout, 1);
+  assert.equal(normalizeConfig({ parallelWriteFanout: 2.6 }).parallelWriteFanout, 3);
+  assert.equal(normalizeConfig({ parallelReadFanout: 99 }).parallelReadFanout, 12);
+  assert.equal(normalizeConfig({ parallelReadFanout: Number.NaN }).parallelReadFanout, 8);
+  assert.equal(normalizeConfig({}).parallelReadFanout, 8);
+});

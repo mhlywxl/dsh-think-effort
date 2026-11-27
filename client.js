@@ -112,6 +112,15 @@ window.__ModuleLoader__.load({
       adaptivePlanRow: '计划模式使用高档',
       adaptivePlanHint: '计划模式下显式提高档位，避免把“探索”误降；不想要可以关闭。',
       adaptivePlanLevelRow: '计划模式使用的档位',
+      sectionParallel: '并行工作（实验）',
+      parallelSectionHint: '独立于档位策略：开启后向每个会话的系统提示注入一段“先拆分、再并行”的规则，让模型在合适时用 subagent / workflow 并行，而不是串行做完所有事。',
+      parallelEnabledRow: '启用并行工作策略',
+      parallelEnabledHint: '默认关闭；切换后下一步请求即生效，不需要重启。只改变模型行为，不给额外工具权限。',
+      parallelWriteFanoutRow: '写任务扇出上限',
+      parallelWriteFanoutHint: '建议 2–4；策略会提示模型不要超过这个数量，避免同文件/共享状态冲突。',
+      parallelReadFanoutRow: '只读任务扇出上限',
+      parallelReadFanoutHint: '建议 4–8；只读调研/审查可以比写任务更宽。',
+      parallelFanoutInvalid: '扇出上限必须是 1–8（写）/ 1–12（只读）之间的整数。',
       debugReasonExploration: '探索',
       debugReasonPlan: '计划',
       debugSection: '调试',
@@ -227,6 +236,15 @@ window.__ModuleLoader__.load({
       adaptivePlanRow: 'Use a higher depth in plan mode',
       adaptivePlanHint: 'Plan mode raises the depth explicitly so exploration is not downgraded there; turn it off if not wanted.',
       adaptivePlanLevelRow: 'Depth used in plan mode',
+      sectionParallel: 'Parallel work (experimental)',
+      parallelSectionHint: 'Independent of the depth policy: when on, a short “split first, run independent units in parallel” rule is injected into every session\'s system prompt, so the model uses subagent / workflow where it fits instead of doing everything serially.',
+      parallelEnabledRow: 'Enable the parallel-work policy',
+      parallelEnabledHint: 'Off by default; the next request picks up the change without a restart. It only changes model behavior; it grants no extra tool permissions.',
+      parallelWriteFanoutRow: 'Write-task fan-out cap',
+      parallelWriteFanoutHint: '2–4 is a good default; the policy tells the model not to exceed it, limiting same-file and shared-state conflicts.',
+      parallelReadFanoutRow: 'Read-only fan-out cap',
+      parallelReadFanoutHint: '4–8 is a good default; read-only research and review can run wider than write tasks.',
+      parallelFanoutInvalid: 'Fan-out caps must be integers: 1–8 for writes, 1–12 for read-only.',
       debugReasonExploration: 'explore',
       debugReasonPlan: 'plan',
       debugSection: 'Debug',
@@ -288,6 +306,7 @@ window.__ModuleLoader__.load({
       'adaptiveEnabled', 'adaptiveExploration', 'adaptiveExplorationLevel',
       'adaptiveTrigger', 'adaptiveReasoningThreshold', 'adaptiveMinRounds',
       'adaptivePlanMode', 'adaptivePlanLevel',
+      'parallelEnabled', 'parallelWriteFanout', 'parallelReadFanout',
       'debugOverlay', 'trace',
     ];
 
@@ -499,6 +518,10 @@ window.__ModuleLoader__.load({
         if (typeof threshold !== 'number' || !Number.isFinite(threshold) || threshold < 0) return t('adaptiveThresholdInvalid');
         const rounds = current.adaptiveMinRounds;
         if (typeof rounds !== 'number' || !Number.isFinite(rounds) || rounds < 1) return t('adaptiveRoundsInvalid');
+        const writeFanout = current.parallelWriteFanout;
+        if (typeof writeFanout !== 'number' || !Number.isInteger(writeFanout) || writeFanout < 1 || writeFanout > 8) return t('parallelFanoutInvalid');
+        const readFanout = current.parallelReadFanout;
+        if (typeof readFanout !== 'number' || !Number.isInteger(readFanout) || readFanout < 1 || readFanout > 12) return t('parallelFanoutInvalid');
         for (const entry of asArray(current.declareModels)) {
           if (entry.includes('/')) continue;
           if (!validPattern(entry)) return t('invalidPattern');
@@ -838,6 +861,48 @@ window.__ModuleLoader__.load({
               key: 'adaptivePlanLevel',
               label: t('adaptivePlanLevelRow'),
               children: levelSelect('adaptivePlanLevel'),
+            }),
+          ],
+        }),
+        Section({
+          title: t('sectionParallel'),
+          hint: t('parallelSectionHint'),
+          children: [
+            Row({
+              key: 'parallelEnabled',
+              label: t('parallelEnabledRow'),
+              hint: t('parallelEnabledHint'),
+              children: Switch({ checked: current.parallelEnabled === true, disabled: busy, label: current.parallelEnabled === true ? t('on') : t('off'), onChange: (next) => patch('parallelEnabled', next) }),
+            }),
+            Row({
+              key: 'parallelWriteFanout',
+              label: t('parallelWriteFanoutRow'),
+              hint: t('parallelWriteFanoutHint'),
+              children: h('input', {
+                className: 'dte-input dte-input-number',
+                type: 'number',
+                min: 1,
+                max: 8,
+                step: 1,
+                value: current.parallelWriteFanout ?? 4,
+                disabled: busy,
+                onChange: (event) => patch('parallelWriteFanout', event.target.value === '' ? 1 : Number(event.target.value)),
+              }),
+            }),
+            Row({
+              key: 'parallelReadFanout',
+              label: t('parallelReadFanoutRow'),
+              hint: t('parallelReadFanoutHint'),
+              children: h('input', {
+                className: 'dte-input dte-input-number',
+                type: 'number',
+                min: 1,
+                max: 12,
+                step: 1,
+                value: current.parallelReadFanout ?? 8,
+                disabled: busy,
+                onChange: (event) => patch('parallelReadFanout', event.target.value === '' ? 1 : Number(event.target.value)),
+              }),
             }),
           ],
         }),

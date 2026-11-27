@@ -60,6 +60,13 @@
         # Plan mode is an explicit signal: map it to its own depth.
         adaptivePlanMode: true
         adaptivePlanLevel: high
+        # Optional parallel-work policy (experimental; off by default). When on,
+        # a short system-prompt section tells the model to split independent
+        # work across subagents/workflow instead of running everything serially.
+        parallelEnabled: false
+        # Fan-out caps advertised by that policy (write 1-8, read-only 1-12).
+        parallelWriteFanout: 4
+        parallelReadFanout: 8
         # Record every effort decision for the conversation's floating debug
         # log (Settings -> Automatic thinking depth -> Debug). Off by default;
         # turning it on never changes a request.

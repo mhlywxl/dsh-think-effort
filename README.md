@@ -2,7 +2,7 @@
 
 **中文（默认）** · [English](#english)
 
-给 DeepSeek Harness（DSH）加一套**声明式自动思考档位**：模型选择器里出现 `Auto`，普通步骤落到模型声明的默认档（DeepSeek 为 `high`），会话标题、上下文压缩、自动复审这类由 Harness 自己发起的廉价调用自动用 `low`。打开调试开关后，每次请求的档位决策会实时出现在会话界面的悬浮窗里，子代理的决策也在其中。
+给 DeepSeek Harness（DSH）加一套**声明式自动思考档位**：模型选择器里出现 `Auto`，普通步骤落到模型声明的默认档（DeepSeek 为 `high`），会话标题、上下文压缩、自动复审这类由 Harness 自己发起的廉价调用自动用 `low`。打开调试开关后，每次请求的档位决策会实时出现在会话界面的悬浮窗里，子代理的决策也在其中。另有可选的**并行工作策略**开关：打开后提示模型在合适时把任务拆给并行的 subagent / workflow，而不是全部串行。
 
 ## 快速开始
 
@@ -109,6 +109,19 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
 
 > 这是从 Reasonix 的实验性 reasoning governor 移植过来的机制（其 v1.39.11 已退役 enforcement，只留 shadow 遥测），所以这里也默认关闭、标注实验：纯思考型任务在探索阶段降档可能降低质量。失败升档、按子代理深度/preset 的多层映射不在本版本范围。
 
+### 并行工作（实验）
+
+默认**关闭**，与档位策略独立：打开后向每个会话的系统提示注入一段“先拆分、再并行”的规则。它只改变模型的行为，不增加工具权限，也不额外发请求；开关是 volatile 的，**下一次请求就生效，不需要重启**。
+
+- **1–2 个独立单元**：提示模型在同一个 step 里发多个 `subagent` 调用（它们并发执行）；
+- **3 个以上**：提示模型用 `workflow` 的 `parallel()` / `pipeline()`，每个 child 写清目标、允许改的文件、验证命令，并返回 JSON；
+- **写范围**：共享文件（lockfile、snapshot、生成文件、迁移）只能一个写者；有依赖用顺序阶段；
+- **扇出上限**：写任务 `parallelWriteFanout`（默认 4），只读任务 `parallelReadFanout`（默认 8）；
+- **集成**：父代理等全部 child 结束，检查 diff/冲突，跑合并后的验证（优先 affected 测试）后才汇报；长全量测试用 `run_in_background`；
+- **明确不要**：用 subagent/workflow 跑测试；小任务、同文件耦合、共享状态无隔离时不要并行。
+
+设置页「并行工作（实验）」：总开关、写扇出上限、只读扇出上限。适合“一个前端工程很多独立 spec/模块”这类任务；如果发现模型拆得太碎，先把上限调小或关掉。
+
 ### 本插件的第一次使用
 
 装上后不需要额外配置：`Auto` 与档位由插件自动声明。选中 `Auto` 即按默认档运行；选 `Low / High / Max` 即固定该档；不选（原生「提供方默认」）在普通步骤上与 `Auto` 等效。
@@ -164,6 +177,9 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
     adaptiveMinRounds: 1
     adaptivePlanMode: true
     adaptivePlanLevel: high
+    parallelEnabled: false
+    parallelWriteFanout: 4
+    parallelReadFanout: 8
     debugOverlay: false
     trace: false
 ```
@@ -183,6 +199,9 @@ DSH Desktop → **插件市场**搜索 `dsh-think-effort` 安装；或 **插件 
 | `auxLevel` | `low` | 廉价调用用的档位 |
 | `autoScope` | `all` | `all` / `declared` / `off` |
 | `subagentLevel` | `inherit` | 子代理档位：`inherit` / `auto` / `low`…`max`；固定档会覆盖子代理自身或继承的选择 |
+| `parallelEnabled` | `false` | 注入并行工作策略（实验；只改模型行为） |
+| `parallelWriteFanout` | `4` | 策略里写任务的扇出上限（1–8） |
+| `parallelReadFanout` | `8` | 策略里只读任务的扇出上限（1–12） |
 | `debugOverlay` | `false` | 在会话界面显示实时档位切换日志（只记录，不改请求） |
 | `trace` | `false` | 把决策写到 stderr（排查用） |
 
@@ -300,6 +319,19 @@ Settings → Automatic thinking depth → **Automatic difficulty (experimental)*
 
 > This ports Reasonix's experimental reasoning governor (v1.39.11 retired its enforcement path and kept only shadow telemetry), so it stays opt-in and marked experimental: downgrading pure-reasoning tasks during exploration can hurt quality. Failure escalation and depth/preset maps are out of scope for this release.
 
+### Parallel work (experimental)
+
+Off by default and independent of the depth policy: when on, a short “split first, run independent units in parallel” rule is injected into every session's system prompt. It only changes model behavior; it grants no tool permissions and sends no extra requests. The switch is volatile, so the **next request** picks it up without a restart.
+
+- **1–2 independent units**: the model is told to emit several `subagent` calls in the same step (they run concurrently);
+- **3+ units**: use `workflow` with `parallel()` / `pipeline()`; every child gets a goal, allowed files, a verification command, and returns JSON;
+- **Write scopes**: shared files (lockfiles, snapshots, generated files, migrations) have exactly one writer; dependent work uses ordered stages;
+- **Fan-out caps**: `parallelWriteFanout` (default 4) for writes, `parallelReadFanout` (default 8) for read-only work;
+- **Integration**: the parent waits for every child, reviews diffs/conflicts, runs the merged verification (affected tests first), and only then reports done; long full suites go to `run_in_background`;
+- **Explicitly not**: using subagent/workflow to run tests; small tasks, same-file coupling, or shared state without isolation.
+
+Settings → Parallel work (experimental): master switch, write fan-out cap, read-only fan-out cap. Designed for tasks like a frontend project with many independent specs/modules; if the model splits too aggressively, lower the caps or turn it off.
+
 ### Features
 
 - Declares `reasoningEfforts` for DeepSeek models that carry none (gateway aliases included), so the selector finally has levels.
@@ -309,6 +341,7 @@ Settings → Automatic thinking depth → **Automatic difficulty (experimental)*
 - Idempotent: a second boot writes nothing; unload restores the original adapter registrations and retires a durable `auto`.
 - **Live debug window**: an opt-in, bounded, in-memory journal served over a Host route and rendered as a movable log over the conversation, subagent decisions included.
 - **Automatic difficulty (experimental)**: an opt-in exploration downgrade and plan-mode elevation for `Auto`, with explicit selections, cheap calls, and fixed subagent depths always taking precedence.
+- **Parallel work (experimental)**: an independent opt-in system-prompt policy that tells the model when to split a task across parallel subagents/workflow, with write-scope, dependency, fan-out and integration rules.
 
 ### Configuration
 
