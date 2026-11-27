@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2 — 2026-11-27
+
+- **修复并行工作开关不生效**：`systemPrompt` 是 Cordis 的 scoped 服务，插件在 apply 阶段用 `ctx.get('systemPrompt')` 拿到的是 `undefined`，导致 section 从未注册、开关看起来无效。改为 `ctx.inject(['systemPrompt'], scope => scope.systemPrompt.section(...))`，服务就绪后注册；没有 prompt registry 的组合仍然只跳过这一段，不影响档位策略。
+- 实测（临时 web profile，trace on）：开关开 → `parallel-policy: enabled=true chars=773`；开关关 → `enabled=false chars=0`。
+- 无配置变化。
+
 ## 0.7.1 — 2026-11-27
 
 - **设置页兼容旧 Host**：并行工作的两个扇出输入在快照缺少字段时按默认值（4 / 8）校验，避免 HMR 只更新了客户端、Host 还是旧版时，保存任何其他设置都被 `parallelFanoutInvalid` 拦住。无行为变化。

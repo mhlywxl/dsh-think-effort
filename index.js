@@ -475,21 +475,25 @@ export function apply(ctx, rawConfig) {
   // plans, while the existing workflow/subagent tools stay the execution path.
   // The section text is a function over the live row config, so the switch
   // takes effect on the next assembled step without a remount.
-  const systemPrompt = ctx.get('systemPrompt');
-  if (systemPrompt?.section !== undefined) {
-    ctx.effect(() => systemPrompt.section({
+  //
+  // `systemPrompt` is a scoped Cordis service: reading `ctx.systemPrompt`
+  // without injection throws, and `ctx.get` can miss it. `ctx.inject` waits
+  // for the service and leaves the rest of the plugin independent of it, so a
+  // composition without a prompt registry still boots the effort policy.
+  ctx.inject?.(['systemPrompt'], (scope) => {
+    scope.effect(() => scope.systemPrompt.section({
       name: 'think-effort:parallel-work',
       order: 700,
       text: () => {
         const policy = readConfig(config);
         const text = buildParallelPolicy(policy);
         if (policy.trace === true) {
-          trace('parallel-policy: enabled=%s chars=%d', String(policy.parallelEnabled), text.length);
+          trace('parallel-policy: enabled=%s chars=%s', String(policy.parallelEnabled), String(text.length));
         }
         return text;
       },
     }), 'think-effort: parallel work');
-  }
+  });
 
   // ── capability declaration ───────────────────────────────────────────────
   /** Serialize settings writes; a boot burst must not stack whole-section updates. */

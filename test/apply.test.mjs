@@ -94,6 +94,9 @@ function fakeHost({ section = PI_AI_SECTION, adapter, planMode, agentPresets, sy
       return () => {};
     },
     inject(deps, callback) {
+      // Cordis waits for an injected service instead of calling back without
+      // it; mirror that so the optional systemPrompt dependency stays optional.
+      if (deps.includes('systemPrompt') && systemPrompt === undefined) return () => {};
       const scope = {
         get: (name) => ctx.get(name),
         effect(fn) {
@@ -102,6 +105,7 @@ function fakeHost({ section = PI_AI_SECTION, adapter, planMode, agentPresets, sy
         },
         tools,
         webServer,
+        systemPrompt,
       };
       callback(scope);
       return () => {};
