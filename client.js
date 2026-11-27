@@ -518,9 +518,9 @@ window.__ModuleLoader__.load({
         if (typeof threshold !== 'number' || !Number.isFinite(threshold) || threshold < 0) return t('adaptiveThresholdInvalid');
         const rounds = current.adaptiveMinRounds;
         if (typeof rounds !== 'number' || !Number.isFinite(rounds) || rounds < 1) return t('adaptiveRoundsInvalid');
-        const writeFanout = current.parallelWriteFanout;
+        const writeFanout = current.parallelWriteFanout ?? 4;
         if (typeof writeFanout !== 'number' || !Number.isInteger(writeFanout) || writeFanout < 1 || writeFanout > 8) return t('parallelFanoutInvalid');
-        const readFanout = current.parallelReadFanout;
+        const readFanout = current.parallelReadFanout ?? 8;
         if (typeof readFanout !== 'number' || !Number.isInteger(readFanout) || readFanout < 1 || readFanout > 12) return t('parallelFanoutInvalid');
         for (const entry of asArray(current.declareModels)) {
           if (entry.includes('/')) continue;
